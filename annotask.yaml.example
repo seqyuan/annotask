@@ -1,0 +1,31 @@
+# annotask configuration file
+# This file should be placed in the same directory as the annotask executable
+
+# Global database path (sqlite3)
+# This database records all annotask runs
+db: ./annotask.db
+
+# Default project name
+project: anno
+
+# Retry configuration
+retry:
+  max: 3  # Maximum retry times for failed tasks
+
+# Default queue for qsubsge mode
+queue: default.q
+
+# Node name for qsubsge mode
+# If empty, will use current hostname
+# In qsubsge mode, program will check if current node matches this value
+node: ""
+
+# Default parameter values
+defaults:
+  line: 1      # Default number of lines to group as one task
+  thread: 1    # Default max concurrent tasks
+  cpu: 1       # Default CPU count (for qsubsge mode)
+  mem: 1       # Default memory in GB (for qsubsge mode)
+  # Note: h_vmem is not configured here. If not specified via --h_vmem,
+  # it will default to mem * 1.25
+
