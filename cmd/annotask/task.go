@@ -1,0 +1,319 @@
+package main
+
+import (
+	"database/sql"
+	"fmt"
+	"io"
+	"log"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"syscall"
+	"time"
+
+	"github.com/dgruber/drmaa"
+	"github.com/seqyuan/annotask/pkg/gpool"
+)
+
+func IlterCommand(dbObj *MySql, thred int, need2run []int, mode JobMode, cpu, mem, h_vmem int) {
+	pool := gpool.New(thred)
+	write_pool := gpool.New(1)
+
+	for _, N := range need2run {
+		pool.Add(1)
+		if mode == ModeQsubSge {
+			go SubmitQsubCommand(N, pool, dbObj, write_pool, cpu, mem, h_vmem)
+		} else {
+			go RunCommand(N, pool, dbObj, write_pool)
+		}
+	}
+
+	write_pool.Wait()
+	pool.Wait()
+}
+
+func RunCommand(N int, pool *gpool.Pool, dbObj *MySql, write_pool *gpool.Pool) {
+	defer pool.Done()
+
+	var subShellPath string
+	var retry int
+	err := dbObj.Db.QueryRow("select shellPath, retry from job where subJob_num = ?", N).Scan(&subShellPath, &retry)
+	CheckErr(err)
+
+	now := time.Now().Format("2006-01-02 15:04:05")
+	write_pool.Add(1)
+	_, err = dbObj.Db.Exec("UPDATE job set status=?, starttime=? where subJob_num=?", J_running, now, N)
+	CheckErr(err)
+	write_pool.Done()
+
+	defaultFailedCode := 1
+	cmd := exec.Command("sh", subShellPath)
+	// 其他程序stdout stderr改到当前目录pwd
+	sho, err := os.OpenFile(fmt.Sprintf("%s.o", subShellPath), os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0755)
+	CheckErr(err)
+	defer sho.Close()
+	she, err := os.OpenFile(fmt.Sprintf("%s.e", subShellPath), os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0755)
+	CheckErr(err)
+	defer she.Close()
+	Owriter := io.MultiWriter(sho)
+	Ewriter := io.MultiWriter(she)
+	cmd.Stdout = Owriter
+	cmd.Stderr = Ewriter
+
+	err = cmd.Start() // Start the process
+	if err != nil {
+		write_pool.Add(1)
+		now = time.Now().Format("2006-01-02 15:04:05")
+		retry++
+		_, err = dbObj.Db.Exec("UPDATE job set status=?, endtime=?, exitCode=?, retry=? where subJob_num=?", J_failed, now, 1, retry, N)
+		write_pool.Done()
+		CheckErr(err)
+		return
+	}
+
+	// Store PID as taskid for local mode
+	write_pool.Add(1)
+	_, err2 := dbObj.Db.Exec("UPDATE job set taskid=? where subJob_num=?", strconv.Itoa(cmd.Process.Pid), N)
+	if err2 != nil {
+		log.Printf("Warning: Could not update taskid: %v", err2)
+	}
+	write_pool.Done()
+
+	err = cmd.Wait() // Wait for process to complete
+
+	var exitCode int
+
+	if err != nil {
+		// try to get the exit code
+		if exitError, ok := err.(*exec.ExitError); ok {
+			ws := exitError.Sys().(syscall.WaitStatus)
+			exitCode = ws.ExitStatus()
+		} else {
+			exitCode = defaultFailedCode
+		}
+	} else {
+		// success, exitCode should be 0 if go is ok
+		ws := cmd.ProcessState.Sys().(syscall.WaitStatus)
+		exitCode = ws.ExitStatus()
+	}
+
+	write_pool.Add(1)
+	now = time.Now().Format("2006-01-02 15:04:05")
+	if exitCode == 0 {
+		_, err = dbObj.Db.Exec("UPDATE job set status=?, endtime=?, exitCode=? where subJob_num=?", J_finished, now, exitCode, N)
+	} else {
+		// Check if process is still running (for retry logic)
+		retry++
+		_, err = dbObj.Db.Exec("UPDATE job set status=?, endtime=?, exitCode=?, retry=? where subJob_num=?", J_failed, now, exitCode, retry, N)
+		// Retry logic will be handled by main loop
+	}
+
+	write_pool.Done()
+	CheckErr(err)
+}
+
+func SubmitQsubCommand(N int, pool *gpool.Pool, dbObj *MySql, write_pool *gpool.Pool, cpu, mem, h_vmem int) {
+	defer pool.Done()
+
+	var subShellPath string
+	var retry int
+	var currentMem int
+	var currentHvmem int
+	var taskid sql.NullString
+	err := dbObj.Db.QueryRow("select shellPath, retry, mem, h_vmem, taskid from job where subJob_num = ?", N).Scan(&subShellPath, &retry, &currentMem, &currentHvmem, &taskid)
+	CheckErr(err)
+
+	// If retry > 0, use stored memory values (may have been increased)
+	if retry > 0 && currentMem > 0 {
+		mem = currentMem
+		h_vmem = currentHvmem
+	}
+
+	now := time.Now().Format("2006-01-02 15:04:05")
+	write_pool.Add(1)
+	_, err = dbObj.Db.Exec("UPDATE job set status=?, starttime=?, cpu=?, mem=?, h_vmem=? where subJob_num=?", J_running, now, cpu, mem, h_vmem, N)
+	CheckErr(err)
+	write_pool.Done()
+
+	// Initialize DRMAA session
+	session, err := drmaa.MakeSession()
+	if err != nil {
+		write_pool.Add(1)
+		now = time.Now().Format("2006-01-02 15:04:05")
+		retry++
+		_, err = dbObj.Db.Exec("UPDATE job set status=?, endtime=?, exitCode=?, retry=? where subJob_num=?", J_failed, now, 1, retry, N)
+		write_pool.Done()
+		log.Printf("Error creating DRMAA session: %v", err)
+		return
+	}
+	defer session.Exit()
+
+	// Create job template
+	jt, err := session.AllocateJobTemplate()
+	if err != nil {
+		write_pool.Add(1)
+		now = time.Now().Format("2006-01-02 15:04:05")
+		retry++
+		_, err = dbObj.Db.Exec("UPDATE job set status=?, endtime=?, exitCode=?, retry=? where subJob_num=?", J_failed, now, 1, retry, N)
+		write_pool.Done()
+		log.Printf("Error allocating job template: %v", err)
+		return
+	}
+	defer session.DeleteJobTemplate(&jt)
+
+	// Get directory and base name of subShellPath
+	subShellDir := filepath.Dir(subShellPath)
+	subShellBase := filepath.Base(subShellPath)
+	subShellBaseNoExt := strings.TrimSuffix(subShellBase, filepath.Ext(subShellBase))
+
+	// Set job template properties
+	jt.SetRemoteCommand(subShellPath)
+	// Set job name to file prefix, so SGE will auto-generate output files as:
+	// {subShellBaseNoExt}.o.{jobID} and {subShellBaseNoExt}.e.{jobID}
+	jt.SetJobName(subShellBaseNoExt)
+
+	// Set resource requirements and working directory
+	// -cwd sets the working directory to subShellPath's directory
+	// SGE will automatically generate output files in the working directory:
+	// {job_name}.o.{jobID} and {job_name}.e.{jobID}
+	nativeSpec := fmt.Sprintf("-cwd %s -l cpu=%d -l mem=%dG -l h_vmem=%dG", subShellDir, cpu, mem, h_vmem)
+	jt.SetNativeSpecification(nativeSpec)
+
+	// Submit job
+	jobID, err := session.RunJob(&jt)
+	if err != nil {
+		write_pool.Add(1)
+		now = time.Now().Format("2006-01-02 15:04:05")
+		retry++
+		_, err = dbObj.Db.Exec("UPDATE job set status=?, endtime=?, exitCode=?, retry=? where subJob_num=?", J_failed, now, 1, retry, N)
+		write_pool.Done()
+		log.Printf("Error submitting job: %v", err)
+		return
+	}
+
+	// Store SGE job ID as taskid for qsubsge mode
+	write_pool.Add(1)
+	_, err = dbObj.Db.Exec("UPDATE job set taskid=? where subJob_num=?", jobID, N)
+	write_pool.Done()
+	CheckErr(err)
+
+	// Monitor job status
+	for {
+		time.Sleep(5 * time.Second)
+
+		// Check job status using DRMAA
+		state, err := session.JobPs(jobID)
+		if err != nil {
+			log.Printf("Error checking job status: %v", err)
+			// Try to determine status from files
+			state = drmaa.PsDone
+		}
+
+		// Check if job is finished
+		if state == drmaa.PsDone || state == drmaa.PsFailed {
+			// Job finished, check exit code
+			var exitCode int = 0
+			var isMemoryError bool = false
+
+			// Build actual file paths using jobID (taskid)
+			// Get directory and base name of subShellPath
+			subShellDir := filepath.Dir(subShellPath)
+			subShellBase := filepath.Base(subShellPath)
+			subShellBaseNoExt := strings.TrimSuffix(subShellBase, filepath.Ext(subShellBase))
+
+			// Check error file for memory-related errors
+			// Error file path: subShellDir/subShellBaseNoExt.e.jobID
+			errFile := filepath.Join(subShellDir, fmt.Sprintf("%s.e.%s", subShellBaseNoExt, jobID))
+			if errData, readErr := os.ReadFile(errFile); readErr == nil {
+				errStr := string(errData)
+				errStrLower := strings.ToLower(errStr)
+				if strings.Contains(errStrLower, "killed") || strings.Contains(errStrLower, "memory") ||
+					strings.Contains(errStrLower, "h_vmem") || strings.Contains(errStrLower, "out of memory") ||
+					strings.Contains(errStrLower, "oom") {
+					isMemoryError = true
+					exitCode = 137 // Typical exit code for OOM kills
+				}
+			}
+
+			// Check if .sign file exists (success indicator)
+			// Sign file is created by the shell script itself, path is still subShellPath.sign
+			signFile := fmt.Sprintf("%s.sign", subShellPath)
+			if _, err := os.Stat(signFile); err == nil {
+				exitCode = 0
+			} else {
+				if !isMemoryError {
+					if state == drmaa.PsFailed {
+						exitCode = 1
+					} else {
+						// Try to get exit code from DRMAA
+						jobInfo, err := session.Wait(jobID, drmaa.TimeoutNoWait)
+						if err == nil && jobInfo.HasExited() {
+							exitCode = int(jobInfo.ExitStatus())
+						} else {
+							exitCode = 1
+						}
+					}
+				}
+			}
+
+			write_pool.Add(1)
+			now = time.Now().Format("2006-01-02 15:04:05")
+			if exitCode == 0 {
+				_, err = dbObj.Db.Exec("UPDATE job set status=?, endtime=?, exitCode=? where subJob_num=?", J_finished, now, exitCode, N)
+			} else {
+				retry++
+				newMem := mem
+				newHvmem := h_vmem
+				if isMemoryError {
+					// Increase memory by 125%
+					newMem = int(float64(mem) * 1.25)
+					newHvmem = int(float64(h_vmem) * 1.25)
+				}
+				_, err = dbObj.Db.Exec("UPDATE job set status=?, endtime=?, exitCode=?, retry=?, mem=?, h_vmem=? where subJob_num=?", J_failed, now, exitCode, retry, newMem, newHvmem, N)
+			}
+			write_pool.Done()
+			CheckErr(err)
+			return
+		}
+		// Job is still running, continue monitoring
+	}
+}
+
+func CheckExitCode(dbObj *MySql) {
+	tx, _ := dbObj.Db.Begin()
+	defer tx.Rollback()
+
+	rows1, err := tx.Query("select subJob_num, shellPath from job where exitCode!=0")
+	CheckErr(err)
+	defer rows1.Close()
+	rows12, err := tx.Query("select subJob_num, shellPath from job where exitCode!=0")
+	CheckErr(err)
+	defer rows12.Close()
+
+	rows0, err := tx.Query("select exitCode from job where exitCode==0")
+	CheckErr(err)
+	defer rows0.Close()
+
+	SuccessCount := CheckCount(rows0)
+	ErrorCount := CheckCount(rows1)
+
+	exitCode := 0
+	os.Stderr.WriteString(fmt.Sprintf("All works: %v\nSuccessed: %v\nError: %v\n", SuccessCount+ErrorCount, SuccessCount, ErrorCount))
+	if ErrorCount > 0 {
+		exitCode = 1
+		os.Stderr.WriteString("Err Shells:\n")
+	}
+
+	var subJob_num int
+	var shellPath string
+	for rows12.Next() {
+		err := rows12.Scan(&subJob_num, &shellPath)
+		CheckErr(err)
+		os.Stderr.WriteString(fmt.Sprintf("%v\t%s\n", subJob_num, shellPath))
+	}
+
+	os.Exit(exitCode)
+}
+

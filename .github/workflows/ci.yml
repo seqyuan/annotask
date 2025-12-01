@@ -46,7 +46,7 @@ jobs:
           # Build annotask
           # Note: Requires DRMAA library for full functionality
           # If DRMAA is not available, build will fail
-          go build -v -o annotask ./cmd/app
+          go build -v -o annotask ./cmd/annotask
 
   lint:
     runs-on: ubuntu-latest

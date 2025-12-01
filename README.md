@@ -70,14 +70,11 @@ go version
 
 ```bash
 # 安装最新版本
-CGO_ENABLED=1 go install github.com/seqyuan/annotask/cmd/app@latest
+CGO_ENABLED=1 go install github.com/seqyuan/annotask/cmd/annotask@latest
 
 # 安装后，可执行文件会在 $GOPATH/bin 或 $HOME/go/bin 目录
 # 确保该目录在 PATH 中：
 export PATH=$PATH:$(go env GOPATH)/bin
-
-# 重命名为 annotask（可选）
-mv $(go env GOPATH)/bin/app $(go env GOPATH)/bin/annotask
 ```
 
 ### 方法 2: 从本地源码安装
@@ -88,10 +85,7 @@ git clone https://github.com/seqyuan/annotask.git
 cd annotask
 
 # 安装
-CGO_ENABLED=1 go install ./cmd/app
-
-# 重命名为 annotask（可选）
-mv $(go env GOPATH)/bin/app $(go env GOPATH)/bin/annotask
+CGO_ENABLED=1 go install ./cmd/annotask
 ```
 
 ### 验证安装
@@ -450,18 +444,3 @@ Task 2: Running -> Finished (Exit: 0)
 - 修改配置文件中的`node`为当前节点名称
 - 或者将`node`设置为空字符串（会自动使用当前主机名）
 
-# 更新日志
-
-## v1.5.0
-- 重命名包名为 annotask
-- 添加 qsubsge 子命令支持SGE集群投递
-- 添加自动重试机制（最多3次）
-- 添加内存自适应重试
-- 添加实时任务状态监控
-- 添加项目管理和全局数据库
-- 添加 stat 和 delete 子命令
-- 支持 YAML 配置文件
-- 数据库列名从 basename 改为 module
-
-## v1.4.0
-- 初始版本

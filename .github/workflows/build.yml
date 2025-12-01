@@ -56,7 +56,7 @@ jobs:
           # Note: This requires DRMAA library for qsubsge mode
           # If DRMAA is not available, the build will fail
           # For production builds, ensure DRMAA is installed or use build tags
-          go build -v -o annotask ./cmd/app
+          go build -v -o annotask ./cmd/annotask
 
       - name: Upload artifact
         if: success()

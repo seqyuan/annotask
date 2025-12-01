@@ -13,7 +13,7 @@ retry:
   max: 3  # Maximum retry times for failed tasks
 
 # Default queue for qsubsge mode
-queue: default.q
+queue: sci.q
 
 # Node name for qsubsge mode
 # If empty, will use current hostname
