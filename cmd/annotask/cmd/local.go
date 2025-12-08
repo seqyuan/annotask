@@ -29,7 +29,9 @@ func runLocalMode(config *Config, args []string) {
 	opt_p := parser.Int("p", "thread", &argparse.Options{Default: config.Defaults.Thread, Help: fmt.Sprintf("Max concurrent tasks to run (default: %d)", config.Defaults.Thread)})
 	opt_project := parser.String("", "project", &argparse.Options{Default: config.Project, Help: fmt.Sprintf("Project name (default: %s)", config.Project)})
 
-	err := parser.Parse(args)
+	// Prepend program name for argparse.Parse (it expects os.Args-like format)
+	parseArgs := append([]string{"annotask"}, args...)
+	err := parser.Parse(parseArgs)
 	if err != nil {
 		// If help is requested, show module help instead of just parser usage
 		errStr := err.Error()

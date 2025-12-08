@@ -64,7 +64,9 @@ func RunDeleteModule(config *Config, args []string) {
 	opt_project := deleteParser.String("p", "project", &argparse.Options{Required: true, Help: "Project name (required)"})
 	opt_module := deleteParser.String("m", "module", &argparse.Options{Help: "Module (shell path basename without extension)"})
 
-	err = deleteParser.Parse(args)
+	// Prepend program name for argparse.Parse (it expects os.Args-like format)
+	parseArgs := append([]string{"annotask"}, args...)
+	err = deleteParser.Parse(parseArgs)
 	if err != nil {
 		// If help is requested, show module help
 		errStr := err.Error()

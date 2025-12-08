@@ -33,7 +33,9 @@ func runQsubSgeMode(config *Config, args []string) {
 	opt_mem := parser.Int("", "mem", &argparse.Options{Default: config.Defaults.Mem, Help: fmt.Sprintf("Memory in GB per task (default: %d)", config.Defaults.Mem)})
 	opt_h_vmem := parser.Int("", "h_vmem", &argparse.Options{Required: false, Help: "Virtual memory in GB per task (default: mem * 1.25 if not set)"})
 
-	err := parser.Parse(args)
+	// Prepend program name for argparse.Parse (it expects os.Args-like format)
+	parseArgs := append([]string{"annotask"}, args...)
+	err := parser.Parse(parseArgs)
 	if err != nil {
 		// If help is requested, show module help
 		errStr := err.Error()

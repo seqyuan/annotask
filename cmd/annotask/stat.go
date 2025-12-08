@@ -116,7 +116,9 @@ func RunStatModule(config *Config, args []string) {
 	opt_project := statParser.String("p", "project", &argparse.Options{Help: "Filter by project name"})
 	opt_module := statParser.Flag("m", "module", &argparse.Options{Help: "Show shell path (requires -p)"})
 
-	err = statParser.Parse(args)
+	// Prepend program name for argparse.Parse (it expects os.Args-like format)
+	parseArgs := append([]string{"annotask"}, args...)
+	err = statParser.Parse(parseArgs)
 	if err != nil {
 		// If help is requested, show module help
 		errStr := err.Error()
