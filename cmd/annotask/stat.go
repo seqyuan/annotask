@@ -19,16 +19,14 @@ func RunStatCommand(globalDB *GlobalDB, projectFilter string, showShellPath bool
 
 	if projectFilter != "" {
 		rows, err = globalDB.Db.Query(`
-			SELECT project, module, mode, starttime, endtime, shellPath, 
-			       totalTasks, pendingTasks, failedTasks, runningTasks, finishedTasks
+			SELECT status, pendingTasks, failedTasks, runningTasks
 			FROM tasks
 			WHERE usrID=? AND project=?
 			ORDER BY project, starttime DESC
 		`, usrID, projectFilter)
 	} else {
 		rows, err = globalDB.Db.Query(`
-			SELECT project, module, mode, starttime, endtime, shellPath, 
-			       totalTasks, pendingTasks, failedTasks, runningTasks, finishedTasks
+			SELECT status, pendingTasks, failedTasks, runningTasks
 			FROM tasks
 			WHERE usrID=?
 			ORDER BY project, starttime DESC
@@ -42,61 +40,61 @@ func RunStatCommand(globalDB *GlobalDB, projectFilter string, showShellPath bool
 
 	if showShellPath {
 		// Only output shell paths when -m is used
+		// Note: -m flag requires status query, but we need shellPath, so query separately
+		if projectFilter != "" {
+			rows, err = globalDB.Db.Query(`
+				SELECT shellPath
+				FROM tasks
+				WHERE usrID=? AND project=?
+				ORDER BY project, starttime DESC
+			`, usrID, projectFilter)
+		} else {
+			rows, err = globalDB.Db.Query(`
+				SELECT shellPath
+				FROM tasks
+				WHERE usrID=?
+				ORDER BY project, starttime DESC
+			`, usrID)
+		}
+		if err != nil {
+			return fmt.Errorf("failed to query tasks: %v", err)
+		}
+		defer rows.Close()
+
 		var count int
 		for rows.Next() {
-			var project, module, mode, starttime, shellPath string
-			var endtime sql.NullString
-			var total, pending, failed, running, finished int
-
-			err := rows.Scan(&project, &module, &mode, &starttime, &endtime, &shellPath,
-				&total, &pending, &failed, &running, &finished)
+			var shellPath string
+			err := rows.Scan(&shellPath)
 			if err != nil {
 				log.Printf("Error scanning row: %v", err)
 				continue
 			}
-
 			fmt.Println(shellPath)
 			count++
 		}
-		fmt.Printf("Total records: %d\n", count)
+		// fmt.Printf("Total records: %d\n", count)
 	} else {
-		// Normal output with all columns
-		fmt.Printf("Tasks for user: %s\n", usrID)
-		if projectFilter != "" {
-			fmt.Printf("Project filter: %s\n", projectFilter)
-		}
-		fmt.Println(strings.Repeat("-", 110))
-		fmt.Printf("%-15s %-20s %-10s %-10s %-10s %-10s %-10s %-12s %-12s\n",
-			"Project", "Module", "Mode", "Pending", "Failed", "Running", "Finished", "Start Time", "End Time")
-		fmt.Println(strings.Repeat("-", 110))
-
+		// Simplified output: only status and num (Pending/Failed/Running)
 		var count int
 		for rows.Next() {
-			var project, module, mode, starttime, shellPath string
-			var endtime sql.NullString
-			var total, pending, failed, running, finished int
+			var status sql.NullString
+			var pending, failed, running int
 
-			err := rows.Scan(&project, &module, &mode, &starttime, &endtime, &shellPath,
-				&total, &pending, &failed, &running, &finished)
+			err := rows.Scan(&status, &pending, &failed, &running)
 			if err != nil {
 				log.Printf("Error scanning row: %v", err)
 				continue
 			}
 
-			// Format time: remove year and seconds (MM-DD HH:MM)
-			starttimeFormatted := formatTimeShort(starttime)
-			endtimeStr := "-"
-			if endtime.Valid {
-				endtimeStr = formatTimeShort(endtime.String)
+			// Format: status num (Pending/Failed/Running)
+			statusStr := "-"
+			if status.Valid {
+				statusStr = status.String
 			}
-
-			fmt.Printf("%-15s %-20s %-10s %-10d %-10d %-10d %-10d %-12s %-12s\n",
-				project, module, mode, pending, failed, running, finished, starttimeFormatted, endtimeStr)
+			num := fmt.Sprintf("%d/%d/%d", pending, failed, running)
+			fmt.Printf("%s\t%s\n", statusStr, num)
 			count++
 		}
-
-		fmt.Println(strings.Repeat("-", 110))
-		fmt.Printf("Total records: %d\n", count)
 	}
 
 	return nil
@@ -148,4 +146,3 @@ func RunStatModule(config *Config, args []string) {
 		log.Fatalf("Stat command failed: %v", err)
 	}
 }
-

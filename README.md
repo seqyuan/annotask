@@ -1,13 +1,29 @@
 <p align="center">
-  <img alt="GoReleaser Logo" src="https://avatars2.githubusercontent.com/u/24697112?v=3&s=200" height="140" />
-  <h3 align="center">annotask</h3>
-  <p align="center">A go binaries for parallel task execution.</p>
+  <pre>
+         █████╗ ███╗   ██╗███╗   ██╗ ██████╗ ████████╗ █████╗ ███████╗██╗  ██╗
+        ██╔══██╗████╗  ██║████╗  ██║██╔═══██╗╚══██╔══╝██╔══██╗██╔════╝██║ ██╔╝
+        ███████║██╔██╗ ██║██╔██╗ ██║██║   ██║   ██║   ███████║███████╗█████╔╝ 
+        ██╔══██║██║╚██╗██║██║╚██╗██║██║   ██║   ██║   ██╔══██║╚════██║██╔═██╗ 
+        ██║  ██║██║ ╚████║██║ ╚████║╚██████╔╝   ██║   ██║  ██║███████║██║  ██╗
+        ╚═╝  ╚═╝╚═╝  ╚═══╝╚═╝  ╚═══╝ ╚═════╝    ╚═╝   ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝
+        
+               ╭─────────────╮
+               │   🐹 Go!    │
+            ╭──┤  ⚡ ⚡ ⚡   ├──╮
+            │  │  ░░░░░░░░  │  │  Parallel Task Execution
+            │  └─────────────┘  │
+            │    ╰───╯ ╰───╯    │  Local & SGE Cluster
+            ╰───────────────────╯
+  </pre>
+</p>
+
+<p align="center">
+  <h2>annotask</h2>
+  <p><strong>Annotation Task</strong> - 并行任务执行工具</p>
+  <p>A Go binary for parallel task execution with local and SGE cluster support</p>
 </p>
 
 ---
-
-# annotask
-Annotation Task，并行任务执行工具
 
 # 程序功能
 > 程序适用于有很多运行时间短，但是需要运行很多的脚本，有助于减少投递的脚本。
@@ -28,75 +44,76 @@ Annotation Task，并行任务执行工具
 
 ## 前置条件
 
-### 1. SQLite3 开发库
+1. SQLite3 开发库
+2. DRMAA 库（如果使用 qsubsge 模式）
+3. Go 编译器 1.22.2 或更高版本
 
-**Ubuntu/Debian:**
-```bash
-sudo apt-get update
-sudo apt-get install -y libsqlite3-dev
-```
+## 编译时设置环境变量
 
-**CentOS/RHEL:**
-```bash
-sudo yum install -y sqlite-devel
-# 或者对于较新版本
-sudo dnf install -y sqlite-devel
-```
+编译程序时需要设置 CGO 环境变量，指向 Grid Engine 的 DRMAA 库。有两种编译方式：
 
-**macOS:**
-```bash
-brew install sqlite
-```
+### 方法 1：使用 rpath（推荐，无需运行时环境变量）
 
-### 2. DRMAA 库（如果使用 qsubsge 模式）
-
-DRMAA 库通常随 Grid Engine/SGE 系统一起安装。如果系统已安装 SGE，DRMAA 库应该已经可用。
-
-**Ubuntu/Debian:**
-```bash
-sudo apt-get install -y libdrmaa1.0 libdrmaa-dev
-```
-
-### 3. Go 编译器
-
-确保已安装 Go 1.22.2 或更高版本：
-```bash
-go version
-```
-
-## 安装步骤
-
-### 方法 1: 从 GitHub 安装（推荐）
+使用 `-Wl,-rpath` 选项将库路径嵌入到二进制文件中，运行时无需设置 `LD_LIBRARY_PATH`：
 
 ```bash
-# 安装最新版本
-CGO_ENABLED=1 go install github.com/seqyuan/annotask/cmd/annotask@latest
+# 设置 Grid Engine DRMAA 路径，并使用 rpath 嵌入库路径
+export CGO_CFLAGS="-I/opt/gridengine/include"
+export CGO_LDFLAGS="-L/opt/gridengine/lib/lx-amd64 -ldrmaa -Wl,-rpath,/opt/gridengine/lib/lx-amd64"
+export LD_LIBRARY_PATH=/opt/gridengine/lib/lx-amd64:$LD_LIBRARY_PATH
 
-# 安装后，可执行文件会在 $GOPATH/bin 或 $HOME/go/bin 目录
-# 确保该目录在 PATH 中：
-export PATH=$PATH:$(go env GOPATH)/bin
+# 安装（编译后可直接运行，无需包装脚本）
+CGO_ENABLED=1 go install github.com/seqyuan/annotask/cmd/annotask@v1.7.2
 ```
 
-### 方法 2: 从本地源码安装
+**优点**：编译后的二进制文件可直接运行，不需要运行时设置环境变量或包装脚本。
+
+### 方法 2：使用运行时包装脚本
+
+如果不使用 rpath，需要在运行时设置 `LD_LIBRARY_PATH`。创建一个包装脚本（例如 `/home/seqyuan/go/bin/annotask1`）：
 
 ```bash
-# 克隆仓库
-git clone https://github.com/seqyuan/annotask.git
-cd annotask
-
-# 安装
-CGO_ENABLED=1 go install ./cmd/annotask
+# 编译时
+export CGO_CFLAGS="-I/opt/gridengine/include"
+export CGO_LDFLAGS="-L/opt/gridengine/lib/lx-amd64 -ldrmaa"
+export LD_LIBRARY_PATH=/opt/gridengine/lib/lx-amd64:$LD_LIBRARY_PATH
+CGO_ENABLED=1 go install github.com/seqyuan/annotask/cmd/annotask@v1.7.2
 ```
-
-### 验证安装
 
 ```bash
-# 检查可执行文件
-which annotask
-
-# 查看帮助
-annotask -h
+# 运行时包装脚本（例如 /home/seqyuan/go/bin/annotask）
+#!/bin/bash
+export LD_LIBRARY_PATH=/opt/gridengine/lib/lx-amd64:$LD_LIBRARY_PATH
+/home/seqyuan/go/bin/annotask_linux "$@"
 ```
+
+**注意**：
+- `CGO_CFLAGS` 和 `CGO_LDFLAGS` 只在编译时需要
+- `LD_LIBRARY_PATH` 在编译时用于链接器找到库，如果使用方法 1 的 rpath，运行时不需要
+- 如果使用方法 2，运行时需要包装脚本设置 `LD_LIBRARY_PATH`
+
+如果使用方法 2，将包装脚本设置为可执行：
+```bash
+chmod +x /home/seqyuan/go/bin/annotask
+```
+
+## 如何查找环境变量
+
+如果不知道 Grid Engine 的安装路径，可以使用以下命令查找：
+
+```bash
+# 查找 drmaa.h 头文件位置
+find /opt/gridengine -name "drmaa.h" 2>/dev/null
+
+# 查找 libdrmaa.so 库文件位置
+find /opt/gridengine -name "libdrmaa.so*" 2>/dev/null
+```
+
+找到路径后：
+- 将头文件所在目录设置为 `CGO_CFLAGS`（例如：`-I/opt/gridengine/include`）
+- 将库文件所在目录设置为 `CGO_LDFLAGS`（例如：`-L/opt/gridengine/lib/lx-amd64 -ldrmaa`）
+- 如果使用方法 1（rpath），在 `CGO_LDFLAGS` 中添加 `-Wl,-rpath,/opt/gridengine/lib/lx-amd64`
+- 编译时也需要设置 `LD_LIBRARY_PATH` 以便链接器找到库
 
 ## 配置文件
 
@@ -110,6 +127,20 @@ annotask -h
 - `defaults`: 各参数的默认值
 
 配置文件示例见 `annotask.yaml.example`。
+
+### 全局数据库权限设置
+
+如果多个用户或多进程需要访问全局数据库，需要设置相应的文件权限。假设全局数据库路径为 `/path/to/annotask.db`：
+
+```bash
+# 对上一级文件夹设置权限
+chmod 777 $(dirname /path/to/annotask.db)
+
+# 对数据库文件设置权限
+chmod 777 /path/to/annotask.db
+```
+
+这样确保所有用户和进程都可以读取和写入全局数据库。
 
 # 使用方法
 

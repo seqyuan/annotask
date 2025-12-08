@@ -10,7 +10,7 @@ import (
 )
 
 // MonitorTaskStatus monitors database and outputs task status changes to stdout
-func MonitorTaskStatus(ctx context.Context, dbObj *MySql, globalDB *GlobalDB, usrID, project, module, mode, shellPath string, startTime time.Time, wg *sync.WaitGroup) {
+func MonitorTaskStatus(ctx context.Context, dbObj *MySql, globalDB *GlobalDB, usrID, project, module, mode, shellPath string, startTime time.Time, config *Config, wg *sync.WaitGroup) {
 	defer wg.Done()
 
 	// Map to track last known status for each task
@@ -63,10 +63,11 @@ func MonitorTaskStatus(ctx context.Context, dbObj *MySql, globalDB *GlobalDB, us
 			rows.Close()
 
 			// Update global database
-			if globalDB != nil {
+			if globalDB != nil && config != nil {
 				total, pending, failed, running, finished, err := GetTaskStats(dbObj)
 				if err == nil {
-					err = UpdateGlobalTaskRecord(globalDB, usrID, project, module, mode, shellPath, startTime, total, pending, failed, running, finished)
+					node := GetNodeName(mode, config, dbObj)
+					err = UpdateGlobalTaskRecord(globalDB, usrID, project, module, mode, shellPath, startTime, total, pending, failed, running, finished, node)
 					if err != nil {
 						log.Printf("Error updating global DB: %v", err)
 					}

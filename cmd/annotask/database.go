@@ -42,6 +42,8 @@ func InitGlobalDB(dbPath string) (*GlobalDB, error) {
 		failedTasks integer DEFAULT 0,
 		runningTasks integer DEFAULT 0,
 		finishedTasks integer DEFAULT 0,
+		status TEXT DEFAULT 'running',
+		node TEXT,
 		UNIQUE(usrID, project, module, starttime)
 	);
 	`
@@ -59,6 +61,27 @@ func InitGlobalDB(dbPath string) (*GlobalDB, error) {
 			log.Printf("Warning: Could not rename basename to module: %v", err)
 		}
 	}
+	
+	// Migrate: add status column if it doesn't exist
+	var statusExists bool
+	err = conn.QueryRow("SELECT COUNT(*) FROM pragma_table_info('tasks') WHERE name='status'").Scan(&statusExists)
+	if err == nil && !statusExists {
+		_, err = conn.Exec("ALTER TABLE tasks ADD COLUMN status TEXT DEFAULT 'running'")
+		if err != nil {
+			log.Printf("Warning: Could not add status column: %v", err)
+		}
+	}
+	
+	// Migrate: add node column if it doesn't exist
+	var nodeExists bool
+	err = conn.QueryRow("SELECT COUNT(*) FROM pragma_table_info('tasks') WHERE name='node'").Scan(&nodeExists)
+	if err == nil && !nodeExists {
+		_, err = conn.Exec("ALTER TABLE tasks ADD COLUMN node TEXT")
+		if err != nil {
+			log.Printf("Warning: Could not add node column: %v", err)
+		}
+	}
+	
 	_, err = conn.Exec(sql_table)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create table: %v", err)
@@ -86,7 +109,8 @@ func (sqObj *MySql) Crt_tb() {
 		cpu integer DEFAULT 1,
 		mem integer DEFAULT 1,
 		h_vmem integer DEFAULT 1,
-		taskid TEXT
+		taskid TEXT,
+		node TEXT
 	);
 	`
 	_, err := sqObj.Db.Exec(sql_job_table)
@@ -119,6 +143,7 @@ func (sqObj *MySql) migrateTable() {
 		"mem":    "integer DEFAULT 1",
 		"h_vmem": "integer DEFAULT 1",
 		"taskid": "TEXT",
+		"node":   "TEXT",
 	}
 
 	for colName, colDef := range columns {
@@ -191,15 +216,16 @@ func GetTaskStats(dbObj *MySql) (total, pending, failed, running, finished int, 
 }
 
 // UpdateGlobalTaskRecord updates or creates a task record in global database
-func UpdateGlobalTaskRecord(globalDB *GlobalDB, usrID, project, module, mode, shellPath string, startTime time.Time, total, pending, failed, running, finished int) error {
+func UpdateGlobalTaskRecord(globalDB *GlobalDB, usrID, project, module, mode, shellPath string, startTime time.Time, total, pending, failed, running, finished int, node string) error {
 	startTimeStr := startTime.Format("2006-01-02 15:04:05")
 
 	// Try to update existing record
+	// Update node field as well to ensure it reflects the current run's node (especially for local mode)
 	result, err := globalDB.Db.Exec(`
 		UPDATE tasks SET 
-			pendingTasks=?, failedTasks=?, runningTasks=?, finishedTasks=?, totalTasks=?
+			pendingTasks=?, failedTasks=?, runningTasks=?, finishedTasks=?, totalTasks=?, node=?
 		WHERE usrID=? AND project=? AND module=? AND starttime=?
-	`, pending, failed, running, finished, total, usrID, project, module, startTimeStr)
+	`, pending, failed, running, finished, total, node, usrID, project, module, startTimeStr)
 	if err != nil {
 		return err
 	}
@@ -211,13 +237,48 @@ func UpdateGlobalTaskRecord(globalDB *GlobalDB, usrID, project, module, mode, sh
 
 	// If no rows affected, insert new record
 	if rowsAffected == 0 {
+		status := "running"
+		if failed == 0 && running == 0 && pending == 0 && total > 0 {
+			status = "completed"
+		} else if failed > 0 {
+			status = "failed"
+		}
 		_, err = globalDB.Db.Exec(`
-			INSERT INTO tasks(usrID, project, module, mode, starttime, shellPath, totalTasks, pendingTasks, failedTasks, runningTasks, finishedTasks)
-			VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		`, usrID, project, module, mode, startTimeStr, shellPath, total, pending, failed, running, finished)
+			INSERT INTO tasks(usrID, project, module, mode, starttime, shellPath, totalTasks, pendingTasks, failedTasks, runningTasks, finishedTasks, status, node)
+			VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`, usrID, project, module, mode, startTimeStr, shellPath, total, pending, failed, running, finished, status, node)
 		return err
 	}
 
 	return nil
+}
+
+// UpdateGlobalTaskStatus updates the status field in global database
+func UpdateGlobalTaskStatus(globalDB *GlobalDB, usrID, project, module string, startTime time.Time, status string) error {
+	startTimeStr := startTime.Format("2006-01-02 15:04:05")
+	_, err := globalDB.Db.Exec(`
+		UPDATE tasks SET status=?
+		WHERE usrID=? AND project=? AND module=? AND starttime=?
+	`, status, usrID, project, module, startTimeStr)
+	return err
+}
+
+// GetNodeName gets the node name based on mode
+// For local mode, returns current hostname
+// For qsubsge mode, returns "-" because tasks may run on multiple different nodes
+func GetNodeName(mode string, config *Config, dbObj *MySql) string {
+	if mode == "local" {
+		hostname, err := os.Hostname()
+		if err != nil {
+			log.Printf("Warning: Could not get hostname: %v", err)
+			return "unknown"
+		}
+		return hostname
+	} else if mode == "qsubsge" {
+		// For qsubsge mode, don't record node in global database
+		// because tasks may run on multiple different nodes
+		return "-"
+	}
+	return "unknown"
 }
 

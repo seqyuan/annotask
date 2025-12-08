@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"io"
@@ -17,20 +18,20 @@ import (
 	"github.com/seqyuan/annotask/pkg/gpool"
 )
 
-func IlterCommand(dbObj *MySql, thred int, need2run []int, mode JobMode, cpu, mem, h_vmem int) {
+func IlterCommand(ctx context.Context, dbObj *MySql, thred int, need2run []int, mode JobMode, cpu, mem, h_vmem int, write_pool *gpool.Pool) {
 	pool := gpool.New(thred)
-	write_pool := gpool.New(1)
 
 	for _, N := range need2run {
 		pool.Add(1)
 		if mode == ModeQsubSge {
-			go SubmitQsubCommand(N, pool, dbObj, write_pool, cpu, mem, h_vmem)
+			go SubmitQsubCommand(ctx, N, pool, dbObj, write_pool, cpu, mem, h_vmem)
 		} else {
 			go RunCommand(N, pool, dbObj, write_pool)
 		}
 	}
 
-	write_pool.Wait()
+	// Wait for all goroutines to complete
+	// write_pool.Wait() is called at runTasks level to ensure all operations complete
 	pool.Wait()
 }
 
@@ -114,7 +115,7 @@ func RunCommand(N int, pool *gpool.Pool, dbObj *MySql, write_pool *gpool.Pool) {
 	CheckErr(err)
 }
 
-func SubmitQsubCommand(N int, pool *gpool.Pool, dbObj *MySql, write_pool *gpool.Pool, cpu, mem, h_vmem int) {
+func SubmitQsubCommand(ctx context.Context, N int, pool *gpool.Pool, dbObj *MySql, write_pool *gpool.Pool, cpu, mem, h_vmem int) {
 	defer pool.Done()
 
 	var subShellPath string
@@ -201,6 +202,18 @@ func SubmitQsubCommand(N int, pool *gpool.Pool, dbObj *MySql, write_pool *gpool.
 
 	// Monitor job status
 	for {
+		// Check if context is cancelled (should not happen normally, but allows graceful shutdown)
+		select {
+		case <-ctx.Done():
+			// Context cancelled, exit monitoring loop
+			// Note: The job will continue running on SGE, we just stop monitoring
+			// The job status will be checked again in the next retry round
+			log.Printf("Context cancelled for job %d (jobID: %s), stopping monitoring. Job continues on SGE.", N, jobID)
+			return
+		default:
+			// Continue monitoring
+		}
+
 		time.Sleep(5 * time.Second)
 
 		// Check job status using DRMAA
@@ -213,9 +226,40 @@ func SubmitQsubCommand(N int, pool *gpool.Pool, dbObj *MySql, write_pool *gpool.
 
 		// Check if job is finished
 		if state == drmaa.PsDone || state == drmaa.PsFailed {
-			// Job finished, check exit code
+			// Job finished, check exit code and get execution node
 			var exitCode int = 0
 			var isMemoryError bool = false
+			var executionNode string = ""
+
+			// Try to get execution node from DRMAA JobInfo
+			jobInfo, err := session.Wait(jobID, drmaa.TimeoutNoWait)
+			if err == nil {
+				// Try to get execution node from ResourceUsage
+				resourceUsage := jobInfo.ResourceUsage()
+				if host, ok := resourceUsage["exec_host"]; ok {
+					// exec_host format might be "node1/1" or "node1", extract node name
+					executionNode = strings.Split(host, "/")[0]
+				} else if host, ok := resourceUsage["hostname"]; ok {
+					executionNode = host
+				} else {
+					// Try using qstat command as fallback
+					cmd := exec.Command("qstat", "-j", jobID)
+					output, err := cmd.Output()
+					if err == nil {
+						lines := strings.Split(string(output), "\n")
+						for _, line := range lines {
+							if strings.HasPrefix(line, "exec_host") {
+								parts := strings.Fields(line)
+								if len(parts) >= 2 {
+									// Format: exec_host  node1/1 or exec_host         node1/1
+									executionNode = strings.Split(parts[len(parts)-1], "/")[0]
+									break
+								}
+							}
+						}
+					}
+				}
+			}
 
 			// Build actual file paths using jobID (taskid)
 			// Get directory and base name of subShellPath
@@ -240,20 +284,17 @@ func SubmitQsubCommand(N int, pool *gpool.Pool, dbObj *MySql, write_pool *gpool.
 			// Check if .sign file exists (success indicator)
 			// Sign file is created by the shell script itself, path is still subShellPath.sign
 			signFile := fmt.Sprintf("%s.sign", subShellPath)
-			if _, err := os.Stat(signFile); err == nil {
+			if _, statErr := os.Stat(signFile); statErr == nil {
 				exitCode = 0
 			} else {
 				if !isMemoryError {
 					if state == drmaa.PsFailed {
 						exitCode = 1
+					} else if err == nil && jobInfo.HasExited() {
+						// err here refers to the err from session.Wait() call above
+						exitCode = int(jobInfo.ExitStatus())
 					} else {
-						// Try to get exit code from DRMAA
-						jobInfo, err := session.Wait(jobID, drmaa.TimeoutNoWait)
-						if err == nil && jobInfo.HasExited() {
-							exitCode = int(jobInfo.ExitStatus())
-						} else {
-							exitCode = 1
-						}
+						exitCode = 1
 					}
 				}
 			}
@@ -261,7 +302,7 @@ func SubmitQsubCommand(N int, pool *gpool.Pool, dbObj *MySql, write_pool *gpool.
 			write_pool.Add(1)
 			now = time.Now().Format("2006-01-02 15:04:05")
 			if exitCode == 0 {
-				_, err = dbObj.Db.Exec("UPDATE job set status=?, endtime=?, exitCode=? where subJob_num=?", J_finished, now, exitCode, N)
+				_, err = dbObj.Db.Exec("UPDATE job set status=?, endtime=?, exitCode=?, node=? where subJob_num=?", J_finished, now, exitCode, executionNode, N)
 			} else {
 				retry++
 				newMem := mem
@@ -271,11 +312,42 @@ func SubmitQsubCommand(N int, pool *gpool.Pool, dbObj *MySql, write_pool *gpool.
 					newMem = int(float64(mem) * 1.25)
 					newHvmem = int(float64(h_vmem) * 1.25)
 				}
-				_, err = dbObj.Db.Exec("UPDATE job set status=?, endtime=?, exitCode=?, retry=?, mem=?, h_vmem=? where subJob_num=?", J_failed, now, exitCode, retry, newMem, newHvmem, N)
+				_, err = dbObj.Db.Exec("UPDATE job set status=?, endtime=?, exitCode=?, retry=?, mem=?, h_vmem=?, node=? where subJob_num=?", J_failed, now, exitCode, retry, newMem, newHvmem, executionNode, N)
 			}
 			write_pool.Done()
 			CheckErr(err)
 			return
+		} else if state == drmaa.PsRunning {
+			// Job is running, try to get execution node if not already stored
+			var currentNode sql.NullString
+			err := dbObj.Db.QueryRow("SELECT node FROM job WHERE subJob_num=?", N).Scan(&currentNode)
+			if err == nil && (!currentNode.Valid || currentNode.String == "") {
+				// Try to get execution node using qstat command
+				cmd := exec.Command("qstat", "-j", jobID)
+				output, err := cmd.Output()
+				if err == nil {
+					lines := strings.Split(string(output), "\n")
+					var executionNode string
+					for _, line := range lines {
+						if strings.HasPrefix(line, "exec_host") {
+							parts := strings.Fields(line)
+							if len(parts) >= 2 {
+								// Format: exec_host  node1/1 or exec_host         node1/1
+								executionNode = strings.Split(parts[len(parts)-1], "/")[0]
+								break
+							}
+						}
+					}
+					if executionNode != "" {
+						write_pool.Add(1)
+						_, err = dbObj.Db.Exec("UPDATE job set node=? where subJob_num=?", executionNode, N)
+						write_pool.Done()
+						if err != nil {
+							log.Printf("Warning: Could not update execution node: %v", err)
+						}
+					}
+				}
+			}
 		}
 		// Job is still running, continue monitoring
 	}
@@ -292,7 +364,7 @@ func CheckExitCode(dbObj *MySql) {
 	CheckErr(err)
 	defer rows12.Close()
 
-	rows0, err := tx.Query("select exitCode from job where exitCode==0")
+	rows0, err := tx.Query("select exitCode from job where exitCode=0")
 	CheckErr(err)
 	defer rows0.Close()
 

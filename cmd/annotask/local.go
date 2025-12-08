@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/akamensky/argparse"
+	"github.com/seqyuan/annotask/pkg/gpool"
 )
 
 // runLocalMode runs tasks in local mode
@@ -72,12 +73,16 @@ func runTasks(config *Config, infile string, line, thread int, project string, m
 	ctx, cancel := context.WithCancel(context.Background())
 	var wg sync.WaitGroup
 	wg.Add(1)
-	go MonitorTaskStatus(ctx, dbObj, globalDB, usrID, project, module, string(mode), shellAbsPath, startTime, &wg)
+	go MonitorTaskStatus(ctx, dbObj, globalDB, usrID, project, module, string(mode), shellAbsPath, startTime, config, &wg)
+
+	// Create write_pool at runTasks level to ensure it outlives all goroutines
+	// This prevents WaitGroup reuse issues when monitoring loops continue after IlterCommand returns
+	write_pool := gpool.New(1)
 
 	// Retry loop for failed tasks
 	maxRetries := config.Retry.Max
 	for retryCount := 0; retryCount < maxRetries; retryCount++ {
-		IlterCommand(dbObj, thread, need2run, mode, cpu, mem, h_vmem)
+		IlterCommand(ctx, dbObj, thread, need2run, mode, cpu, mem, h_vmem, write_pool)
 		need2run = GetNeed2Run(dbObj)
 		if len(need2run) == 0 {
 			break
@@ -86,6 +91,10 @@ func runTasks(config *Config, infile string, line, thread int, project string, m
 		time.Sleep(2 * time.Second)
 	}
 
+	// Wait for all database write operations to complete
+	// This must be done before stopping the monitor goroutine
+	write_pool.Wait()
+
 	// Stop the monitor goroutine
 	cancel()
 	wg.Wait()
@@ -93,12 +102,34 @@ func runTasks(config *Config, infile string, line, thread int, project string, m
 	// Final update to global DB
 	endTime := time.Now()
 	total, pending, failed, running, finished, _ := GetTaskStats(dbObj)
-	UpdateGlobalTaskRecord(globalDB, usrID, project, module, string(mode), shellAbsPath, startTime, total, pending, failed, running, finished)
+	node := GetNodeName(string(mode), config, dbObj)
+	UpdateGlobalTaskRecord(globalDB, usrID, project, module, string(mode), shellAbsPath, startTime, total, pending, failed, running, finished, node)
 	// Update endtime
 	startTimeStr := startTime.Format("2006-01-02 15:04:05")
 	endTimeStr := endTime.Format("2006-01-02 15:04:05")
-	globalDB.Db.Exec("UPDATE tasks SET endtime=? WHERE usrID=? AND project=? AND module=? AND starttime=?",
+	_, err = globalDB.Db.Exec("UPDATE tasks SET endtime=? WHERE usrID=? AND project=? AND module=? AND starttime=?",
 		endTimeStr, usrID, project, module, startTimeStr)
+	if err != nil {
+		log.Printf("Warning: Could not update endtime: %v", err)
+	}
+
+	// Update module status based on final task results
+	// Check if there are any failed tasks (exitCode != 0)
+	var failedCount int
+	err = dbObj.Db.QueryRow("SELECT COUNT(*) FROM job WHERE exitCode!=0").Scan(&failedCount)
+	if err != nil {
+		log.Printf("Warning: Could not check failed tasks count: %v", err)
+	} else {
+		if failedCount > 0 {
+			if updateErr := UpdateGlobalTaskStatus(globalDB, usrID, project, module, startTime, "failed"); updateErr != nil {
+				log.Printf("Warning: Could not update module status to failed: %v", updateErr)
+			}
+		} else {
+			if updateErr := UpdateGlobalTaskStatus(globalDB, usrID, project, module, startTime, "completed"); updateErr != nil {
+				log.Printf("Warning: Could not update module status to completed: %v", updateErr)
+			}
+		}
+	}
 
 	CheckExitCode(dbObj)
 }
