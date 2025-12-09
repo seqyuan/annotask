@@ -62,6 +62,11 @@ func MonitorTaskStatus(ctx context.Context, dbObj *MySql, globalDB *GlobalDB, us
 				}
 				currentStatus[ts.subJobNum] = ts
 
+				// Skip output for Pending status
+				if ts.status == "Pending" {
+					continue
+				}
+
 				// Check if status changed
 				last, exists := lastStatus[ts.subJobNum]
 				if !exists {

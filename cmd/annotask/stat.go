@@ -11,88 +11,118 @@ import (
 )
 
 // RunStatCommand runs the stat subcommand
-func RunStatCommand(globalDB *GlobalDB, projectFilter string, showShellPath bool) error {
+func RunStatCommand(globalDB *GlobalDB, projectFilter string) error {
 	usrID := GetCurrentUserID()
 
 	var rows *sql.Rows
 	var err error
 
 	if projectFilter != "" {
+		// When -p is used, show different format: module pending running failed finished stime etime
 		rows, err = globalDB.Db.Query(`
-			SELECT status, pendingTasks, failedTasks, runningTasks
+			SELECT module, pendingTasks, runningTasks, failedTasks, finishedTasks, starttime, endtime, shellPath
 			FROM tasks
 			WHERE usrID=? AND project=?
-			ORDER BY project, starttime DESC
+			ORDER BY starttime DESC
 		`, usrID, projectFilter)
-	} else {
-		rows, err = globalDB.Db.Query(`
-			SELECT status, pendingTasks, failedTasks, runningTasks
-			FROM tasks
-			WHERE usrID=?
-			ORDER BY project, starttime DESC
-		`, usrID)
-	}
-
-	if err != nil {
-		return fmt.Errorf("failed to query tasks: %v", err)
-	}
-	defer rows.Close()
-
-	if showShellPath {
-		// Only output shell paths when -m is used
-		// Note: -m flag requires status query, but we need shellPath, so query separately
-		if projectFilter != "" {
-			rows, err = globalDB.Db.Query(`
-				SELECT shellPath
-				FROM tasks
-				WHERE usrID=? AND project=?
-				ORDER BY project, starttime DESC
-			`, usrID, projectFilter)
-		} else {
-			rows, err = globalDB.Db.Query(`
-				SELECT shellPath
-				FROM tasks
-				WHERE usrID=?
-				ORDER BY project, starttime DESC
-			`, usrID)
-		}
 		if err != nil {
 			return fmt.Errorf("failed to query tasks: %v", err)
 		}
 		defer rows.Close()
 
-		var count int
-		for rows.Next() {
-			var shellPath string
-			err := rows.Scan(&shellPath)
-			if err != nil {
-				log.Printf("Error scanning row: %v", err)
-				continue
-			}
-			fmt.Println(shellPath)
-			count++
+		// First output table: module pending running failed finished stime etime
+		fmt.Printf("%-20s %-8s %-8s %-8s %-9s %-12s %-12s\n",
+			"module", "pending", "running", "failed", "finished", "stime", "etime")
+
+		var modules []struct {
+			module    string
+			shellPath string
 		}
-		// fmt.Printf("Total records: %d\n", count)
-	} else {
-		// Simplified output: only status and num (Pending/Failed/Running)
-		var count int
-		for rows.Next() {
-			var status sql.NullString
-			var pending, failed, running int
 
-			err := rows.Scan(&status, &pending, &failed, &running)
+		for rows.Next() {
+			var module, starttime, shellPath string
+			var pending, running, failed, finished int
+			var endtime sql.NullString
+
+			err := rows.Scan(&module, &pending, &running, &failed, &finished, &starttime, &endtime, &shellPath)
 			if err != nil {
 				log.Printf("Error scanning row: %v", err)
 				continue
 			}
 
-			// Format: status num (Pending/Failed/Running)
+			// Format starttime and endtime: MM-DD HH:MM
+			stimeStr := formatTimeShort(starttime)
+			etimeStr := "-"
+			if endtime.Valid {
+				etimeStr = formatTimeShort(endtime.String)
+			}
+
+			fmt.Printf("%-20s %-8d %-8d %-8d %-9d %-12s %-12s\n",
+				module, pending, running, failed, finished, stimeStr, etimeStr)
+
+			// Store module and shellPath for later output
+			modules = append(modules, struct {
+				module    string
+				shellPath string
+			}{module: module, shellPath: shellPath})
+		}
+
+		// Then output shell paths for each module: module_shellPath
+		if len(modules) > 0 {
+			fmt.Println() // Empty line separator
+			for _, m := range modules {
+				fmt.Printf("%s_%s\n", m.module, m.shellPath)
+			}
+		}
+	} else {
+		// When no -p, show: project module mode status statis stime etime
+		rows, err = globalDB.Db.Query(`
+			SELECT project, module, mode, status, totalTasks, pendingTasks, starttime, endtime
+			FROM tasks
+			WHERE usrID=?
+			ORDER BY project, starttime DESC
+		`, usrID)
+		if err != nil {
+			return fmt.Errorf("failed to query tasks: %v", err)
+		}
+		defer rows.Close()
+
+		// Output format: project module mode status statis stime etime
+		// statis format: totalTasks/pendingTasks
+		fmt.Printf("%-15s %-20s %-10s %-10s %-15s %-12s %-12s\n",
+			"project", "module", "mode", "status", "statis", "stime", "etime")
+
+		var count int
+		for rows.Next() {
+			var project, module, mode, starttime string
+			var status sql.NullString
+			var totalTasks, pendingTasks int
+			var endtime sql.NullString
+
+			err := rows.Scan(&project, &module, &mode, &status, &totalTasks, &pendingTasks, &starttime, &endtime)
+			if err != nil {
+				log.Printf("Error scanning row: %v", err)
+				continue
+			}
+
+			// Format status
 			statusStr := "-"
 			if status.Valid {
 				statusStr = status.String
 			}
-			num := fmt.Sprintf("%d/%d/%d", pending, failed, running)
-			fmt.Printf("%s\t%s\n", statusStr, num)
+
+			// Format statis: totalTasks/pendingTasks
+			statisStr := fmt.Sprintf("%d/%d", totalTasks, pendingTasks)
+
+			// Format starttime and endtime: MM-DD HH:MM
+			stimeStr := formatTimeShort(starttime)
+			etimeStr := "-"
+			if endtime.Valid {
+				etimeStr = formatTimeShort(endtime.String)
+			}
+
+			fmt.Printf("%-15s %-20s %-10s %-10s %-15s %-12s %-12s\n",
+				project, module, mode, statusStr, statisStr, stimeStr, etimeStr)
 			count++
 		}
 	}
@@ -112,7 +142,6 @@ func RunStatModule(config *Config, args []string) {
 	// Parse stat command arguments
 	statParser := argparse.NewParser("annotask stat", "Query task status from global database")
 	opt_project := statParser.String("p", "project", &argparse.Options{Help: "Filter by project name"})
-	opt_module := statParser.Flag("m", "module", &argparse.Options{Help: "Show shell path (requires -p)"})
 
 	// Prepend program name for argparse.Parse (it expects os.Args-like format)
 	parseArgs := append([]string{"annotask"}, args...)
@@ -128,20 +157,12 @@ func RunStatModule(config *Config, args []string) {
 		os.Exit(1)
 	}
 
-	// Check if -m is used without -p
-	if opt_module != nil && *opt_module {
-		if opt_project == nil || *opt_project == "" {
-			log.Fatal("Error: -m parameter requires -p parameter to be set")
-		}
-	}
-
 	projectFilter := ""
 	if opt_project != nil && *opt_project != "" {
 		projectFilter = *opt_project
 	}
 
-	showShellPath := opt_module != nil && *opt_module
-	err = RunStatCommand(globalDB, projectFilter, showShellPath)
+	err = RunStatCommand(globalDB, projectFilter)
 	if err != nil {
 		log.Fatalf("Stat command failed: %v", err)
 	}

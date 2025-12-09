@@ -63,7 +63,7 @@ export CGO_LDFLAGS="-L/opt/gridengine/lib/lx-amd64 -ldrmaa -Wl,-rpath,/opt/gride
 export LD_LIBRARY_PATH=/opt/gridengine/lib/lx-amd64:$LD_LIBRARY_PATH
 
 # 安装（从 GitHub 下载并编译指定版本）
-CGO_ENABLED=1 go install github.com/seqyuan/annotask/cmd/annotask@v1.7.2
+CGO_ENABLED=1 go install github.com/seqyuan/annotask/cmd/annotask@latest
 ```
 
 **优点**：编译后的二进制文件可直接运行，不需要运行时设置环境变量或包装脚本。
@@ -77,7 +77,7 @@ CGO_ENABLED=1 go install github.com/seqyuan/annotask/cmd/annotask@v1.7.2
 export CGO_CFLAGS="-I/opt/gridengine/include"
 export CGO_LDFLAGS="-L/opt/gridengine/lib/lx-amd64 -ldrmaa"
 export LD_LIBRARY_PATH=/opt/gridengine/lib/lx-amd64:$LD_LIBRARY_PATH
-CGO_ENABLED=1 go install github.com/seqyuan/annotask/cmd/annotask@v1.7.2
+CGO_ENABLED=1 go install github.com/seqyuan/annotask/cmd/annotask@v1.7.5
 ```
 
 ```bash
@@ -306,31 +306,15 @@ annotask stat -p myproject
 
 示例输出：
 ```
-Tasks for user: username
-Project filter: myproject
-----------------------------------------------------------------------------------------------------------------------
-Project         Module                Mode       Pending    Failed     Running    Finished   Start Time  End Time
-----------------------------------------------------------------------------------------------------------------------
-myproject       input                 local      0          0          0          5          12-25 14:30  12-25 15:45
-myproject       process               qsubsge    2          1          3          10         12-26 09:15  -
-----------------------------------------------------------------------------------------------------------------------
-Total records: 2
+module               pending  running  failed   finished  stime        etime       
+input                0        0        0        5         12-25 14:30  12-25 15:45
+process              2        3        1        10        12-26 09:15  -
+
+input_/absolute/path/to/input.sh
+process_/absolute/path/to/process.sh
 ```
 
-### 查询并显示 Shell Path
-
-```bash
-annotask stat -p myproject -m
-```
-
-示例输出：
-```
-/absolute/path/to/input.sh
-/absolute/path/to/process.sh
-Total records: 2
-```
-
-注意：`-m` 参数必须与 `-p` 参数一起使用，使用 `-m` 时只输出 Shell Path，每行一个路径。
+注意：使用 `-p` 参数时会自动显示表格和 shellPath 列表。
 
 ## 删除任务记录
 

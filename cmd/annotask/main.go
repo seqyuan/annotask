@@ -8,7 +8,7 @@ import (
 
 // printModuleList prints list of available modules
 func printModuleList() {
-	fmt.Println("annotask - parallel task v1.7.3")
+	fmt.Println("annotask - parallel task v1.7.5")
 	fmt.Println()
 	fmt.Println("Available modules:")
 	fmt.Println("    local             Run tasks locally (default module)")
@@ -58,12 +58,11 @@ func printModuleHelp(module string, config *Config) {
 		fmt.Println("annotask stat - Query task status from global database")
 		fmt.Println()
 		fmt.Println("USAGE:")
-		fmt.Println("    annotask stat [-p|--project <project>] [-m|--module]")
+		fmt.Println("    annotask stat [-p|--project <project>]")
 		fmt.Println()
 		fmt.Println("OPTIONS:")
 		fmt.Println("    -h, --help        Print help information")
 		fmt.Println("    -p, --project     Filter by project name")
-		fmt.Println("    -m, --module      Show shell path (requires -p)")
 	case "delete":
 		fmt.Println("annotask delete - Delete task records from global database")
 		fmt.Println()
