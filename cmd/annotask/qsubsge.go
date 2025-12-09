@@ -20,7 +20,7 @@ func runQsubSgeMode(config *Config, args []string) {
 	}
 
 	// Check node
-	if err := CheckNode(config.Node); err != nil {
+	if err := CheckNode([]string(config.Node)); err != nil {
 		log.Fatalf("Node check failed: %v", err)
 	}
 

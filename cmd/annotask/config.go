@@ -54,7 +54,7 @@ func LoadConfig() (*Config, error) {
 
 	// If node is empty or nil, initialize as empty slice
 	// Empty node list means no node restriction for qsubsge mode
-	if config.Node == nil {
+	if len(config.Node) == 0 {
 		config.Node = []string{}
 	}
 

@@ -1,10 +1,49 @@
 package main
 
-import "database/sql"
+import (
+	"database/sql"
+	"fmt"
+
+	"gopkg.in/yaml.v3"
+)
 
 // MySql represents a local database connection
 type MySql struct {
 	Db *sql.DB
+}
+
+// NodeList is a custom type that can unmarshal from both string and []string
+type NodeList []string
+
+// UnmarshalYAML implements custom YAML unmarshaling to support both string and []string
+func (n *NodeList) UnmarshalYAML(value *yaml.Node) error {
+	if value == nil {
+		*n = []string{}
+		return nil
+	}
+
+	switch value.Kind {
+	case yaml.ScalarNode:
+		// Handle string (including empty string)
+		if value.Value == "" {
+			*n = []string{}
+		} else {
+			*n = []string{value.Value}
+		}
+		return nil
+	case yaml.SequenceNode:
+		// Handle array
+		result := make([]string, 0, len(value.Content))
+		for _, item := range value.Content {
+			if item.Kind == yaml.ScalarNode {
+				result = append(result, item.Value)
+			}
+		}
+		*n = result
+		return nil
+	default:
+		return fmt.Errorf("node must be a string or a list of strings, got %v", value.Kind)
+	}
 }
 
 // Config represents the application configuration
@@ -15,7 +54,7 @@ type Config struct {
 		Max int `yaml:"max"`
 	} `yaml:"retry"`
 	Queue      string   `yaml:"queue"`
-	Node       []string `yaml:"node"`
+	Node       NodeList `yaml:"node"`
 	SgeProject string   `yaml:"sge_project"`
 	Defaults   struct {
 		Line   int `yaml:"line"`

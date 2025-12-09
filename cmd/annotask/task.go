@@ -153,9 +153,17 @@ func SubmitQsubCommand(ctx context.Context, N int, pool *gpool.Pool, dbObj *MySq
 		write_pool.Add(1)
 		now = time.Now().Format("2006-01-02 15:04:05")
 		retry++
-		_, err = dbObj.Db.Exec("UPDATE job set status=?, endtime=?, exitCode=?, retry=? where subJob_num=?", J_failed, now, 1, retry, N)
+		drmaaErr := err // Save original error before database update
+		_, dbErr := dbObj.Db.Exec("UPDATE job set status=?, endtime=?, exitCode=?, retry=? where subJob_num=?", J_failed, now, 1, retry, N)
 		write_pool.Done()
-		log.Printf("Error creating DRMAA session: %v", err)
+		if dbErr != nil {
+			log.Printf("Error updating database: %v", dbErr)
+		}
+		if drmaaErr != nil {
+			log.Printf("Error creating DRMAA session: %v", drmaaErr)
+		} else {
+			log.Printf("Error creating DRMAA session: unknown error (err is nil)")
+		}
 		return
 	}
 	defer session.Exit()
@@ -166,9 +174,17 @@ func SubmitQsubCommand(ctx context.Context, N int, pool *gpool.Pool, dbObj *MySq
 		write_pool.Add(1)
 		now = time.Now().Format("2006-01-02 15:04:05")
 		retry++
-		_, err = dbObj.Db.Exec("UPDATE job set status=?, endtime=?, exitCode=?, retry=? where subJob_num=?", J_failed, now, 1, retry, N)
+		templateErr := err // Save original error before database update
+		_, dbErr := dbObj.Db.Exec("UPDATE job set status=?, endtime=?, exitCode=?, retry=? where subJob_num=?", J_failed, now, 1, retry, N)
 		write_pool.Done()
-		log.Printf("Error allocating job template: %v", err)
+		if dbErr != nil {
+			log.Printf("Error updating database: %v", dbErr)
+		}
+		if templateErr != nil {
+			log.Printf("Error allocating job template: %v", templateErr)
+		} else {
+			log.Printf("Error allocating job template: unknown error (err is nil)")
+		}
 		return
 	}
 	defer session.DeleteJobTemplate(&jt)
@@ -212,9 +228,17 @@ func SubmitQsubCommand(ctx context.Context, N int, pool *gpool.Pool, dbObj *MySq
 		write_pool.Add(1)
 		now = time.Now().Format("2006-01-02 15:04:05")
 		retry++
-		_, err = dbObj.Db.Exec("UPDATE job set status=?, endtime=?, exitCode=?, retry=? where subJob_num=?", J_failed, now, 1, retry, N)
+		submitErr := err // Save original error before database update
+		_, dbErr := dbObj.Db.Exec("UPDATE job set status=?, endtime=?, exitCode=?, retry=? where subJob_num=?", J_failed, now, 1, retry, N)
 		write_pool.Done()
-		log.Printf("Error submitting job: %v", err)
+		if dbErr != nil {
+			log.Printf("Error updating database: %v", dbErr)
+		}
+		if submitErr != nil {
+			log.Printf("Error submitting job: %v", submitErr)
+		} else {
+			log.Printf("Error submitting job: unknown error (err is nil)")
+		}
 		return
 	}
 
