@@ -26,7 +26,7 @@ func LoadConfig() (*Config, error) {
 	}
 	config.Retry.Max = 3
 	config.Queue = "default.q"
-	config.Node = ""
+	config.Node = []string{}
 	config.SgeProject = ""
 	config.Defaults.Line = 1
 	config.Defaults.Thread = 1
@@ -52,15 +52,10 @@ func LoadConfig() (*Config, error) {
 		}
 	}
 
-	// If node is empty, get current hostname
-	if config.Node == "" {
-		hostname, err := os.Hostname()
-		if err != nil {
-			log.Printf("Warning: Could not get hostname: %v", err)
-			config.Node = "unknown"
-		} else {
-			config.Node = hostname
-		}
+	// If node is empty or nil, initialize as empty slice
+	// Empty node list means no node restriction for qsubsge mode
+	if config.Node == nil {
+		config.Node = []string{}
 	}
 
 	return config, nil
@@ -75,14 +70,25 @@ func GetCurrentUserID() string {
 	return u.Username
 }
 
-// CheckNode checks if current node matches config node (for qsubsge mode)
-func CheckNode(configNode string) error {
+// CheckNode checks if current node is in the allowed nodes list (for qsubsge mode)
+// If configNodes is empty, no restriction is applied
+func CheckNode(configNodes []string) error {
+	// If node list is empty, no restriction
+	if len(configNodes) == 0 {
+		return nil
+	}
+
 	currentNode, err := os.Hostname()
 	if err != nil {
 		return fmt.Errorf("failed to get hostname: %v", err)
 	}
-	if currentNode != configNode {
-		return fmt.Errorf("current node (%s) does not match config node (%s)", currentNode, configNode)
+
+	// Check if current node is in the allowed list
+	for _, allowedNode := range configNodes {
+		if currentNode == allowedNode {
+			return nil
+		}
 	}
-	return nil
+
+	return fmt.Errorf("current node (%s) is not in allowed nodes list: %v", currentNode, configNodes)
 }

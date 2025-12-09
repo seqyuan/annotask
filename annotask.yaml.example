@@ -19,10 +19,13 @@ queue: sci.q
 # If not set, jobs will use default project or no project
 sge_project: ""
 
-# Node name for qsubsge mode
-# If empty, will use current hostname
-# In qsubsge mode, program will check if current node matches this value
-node: ""
+# Allowed node names for qsubsge mode (list format)
+# If empty or not set, no node restriction will be applied
+# In qsubsge mode, program will check if current node is in this list
+# If current node is in the list, qsubsge mode can be used
+node:
+  - bj-sci-login1
+  - login-0-2
 
 # Default parameter values
 defaults:

@@ -1,20 +1,5 @@
 <p align="center">
-  <pre>
-         █████╗ ███╗   ██╗███╗   ██╗ ██████╗ ████████╗ █████╗ ███████╗██╗  ██╗
-        ██╔══██╗████╗  ██║████╗  ██║██╔═══██╗╚══██╔══╝██╔══██╗██╔════╝██║ ██╔╝
-        ███████║██╔██╗ ██║██╔██╗ ██║██║   ██║   ██║   ███████║███████╗█████╔╝ 
-        ██╔══██║██║╚██╗██║██║╚██╗██║██║   ██║   ██║   ██╔══██║╚════██║██╔═██╗ 
-        ██║  ██║██║ ╚████║██║ ╚████║╚██████╔╝   ██║   ██║  ██║███████║██║  ██╗
-        ╚═╝  ╚═╝╚═╝  ╚═══╝╚═╝  ╚═══╝ ╚═════╝    ╚═╝   ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝
-        
-               ╭─────────────╮
-               │   🐹 Go!    │
-            ╭──┤  ⚡ ⚡ ⚡   ├──╮
-            │  │  ░░░░░░░░  │  │  Parallel Task Execution
-            │  └─────────────┘  │
-            │    ╰───╯ ╰───╯    │  Local & SGE Cluster
-            ╰───────────────────╯
-  </pre>
+  <img src="https://raw.githubusercontent.com/seqyuan/annotask-doc/main/.vuepress/public/logo.svg" alt="annotask logo" width="200" height="200">
 </p>
 
 <p align="center">
@@ -41,21 +26,7 @@
 10. 支持项目管理和任务状态查询
 
 # 安装
-
-## 前置条件
-
-1. SQLite3 开发库
-2. DRMAA 库（如果使用 qsubsge 模式）
-3. Go 编译器 1.22.2 或更高版本
-
-## 编译时设置环境变量
-
-编译程序时需要设置 CGO 环境变量，指向 Grid Engine 的 DRMAA 库。有两种编译方式：
-
-### 方法 1：使用 rpath（推荐，无需运行时环境变量）
-
-使用 `-Wl,-rpath` 选项将库路径嵌入到二进制文件中，运行时无需设置 `LD_LIBRARY_PATH`：
-
+### 安装命令
 ```bash
 # 设置 Grid Engine DRMAA 路径，并使用 rpath 嵌入库路径
 export CGO_CFLAGS="-I/opt/gridengine/include"
@@ -63,41 +34,45 @@ export CGO_LDFLAGS="-L/opt/gridengine/lib/lx-amd64 -ldrmaa -Wl,-rpath,/opt/gride
 export LD_LIBRARY_PATH=/opt/gridengine/lib/lx-amd64:$LD_LIBRARY_PATH
 
 # 安装（从 GitHub 下载并编译指定版本）
-CGO_ENABLED=1 go install github.com/seqyuan/annotask/cmd/annotask@latest
-```
-
-**优点**：编译后的二进制文件可直接运行，不需要运行时设置环境变量或包装脚本。
-
-### 方法 2：使用运行时包装脚本
-
-如果不使用 rpath，需要在运行时设置 `LD_LIBRARY_PATH`。创建一个包装脚本（例如 `/home/seqyuan/go/bin/annotask1`）：
-
-```bash
-# 编译时
-export CGO_CFLAGS="-I/opt/gridengine/include"
-export CGO_LDFLAGS="-L/opt/gridengine/lib/lx-amd64 -ldrmaa"
-export LD_LIBRARY_PATH=/opt/gridengine/lib/lx-amd64:$LD_LIBRARY_PATH
-CGO_ENABLED=1 go install github.com/seqyuan/annotask/cmd/annotask@v1.7.7
+CGO_ENABLED=1 go install github.com/seqyuan/annotask/cmd/annotask@v1.7.8
 ```
 
 ```bash
-# 运行时包装脚本（例如 /home/seqyuan/go/bin/annotask）
-#!/bin/bash
-export LD_LIBRARY_PATH=/opt/gridengine/lib/lx-amd64:$LD_LIBRARY_PATH
-/home/seqyuan/go/bin/annotask_linux "$@"
+which annotask
 ```
+## 配置文件
 
-**注意**：
-- `CGO_CFLAGS` 和 `CGO_LDFLAGS` 只在编译时需要
-- `LD_LIBRARY_PATH` 在编译时用于链接器找到库，如果使用方法 1 的 rpath，运行时不需要
-- 如果使用方法 2，运行时需要包装脚本设置 `LD_LIBRARY_PATH`
+首次运行 `annotask` 时，会在程序所在目录自动创建 `annotask.yaml` 配置文件。配置文件包含：
 
-如果使用方法 2，将包装脚本设置为可执行：
+- `db`: 全局数据库路径（记录所有任务）
+- `project`: 默认项目名称
+- `retry.max`: 最大重试次数
+- `queue`: SGE 默认队列
+- `node`: 允许使用 qsubsge 模式的节点列表（列表格式，支持多个节点）
+  - 如果为空或不设置，则不对 qsubsge 模式做节点限制
+  - 如果设置了节点列表，当前节点必须在列表中才能使用 qsubsge 模式
+- `defaults`: 各参数的默认值
+
+配置文件示例见 `annotask.yaml.example`。
+
+## 全局数据库权限设置
+
+如果多个用户或多进程需要访问全局数据库（配置文件中 `db` 字段指定的路径），需要设置相应的文件权限：
+
 ```bash
-chmod +x /home/seqyuan/go/bin/annotask
+# 假设全局数据库路径为 /path/to/annotask.db
+# 对上一级文件夹设置权限
+chmod 777 $(dirname /path/to/annotask.db)
+
+# 对数据库文件设置权限
+chmod 777 /path/to/annotask.db
 ```
 
-## 如何查找环境变量
+这样确保所有用户和进程都可以读取和写入全局数据库。
+
+
+## Tips
+#### 如何查找环境变量
 
 如果不知道 Grid Engine 的安装路径，可以使用以下命令查找：
 
@@ -115,38 +90,14 @@ find /opt/gridengine -name "libdrmaa.so*" 2>/dev/null
 - 如果使用方法 1（rpath），在 `CGO_LDFLAGS` 中添加 `-Wl,-rpath,/opt/gridengine/lib/lx-amd64`
 - 编译时也需要设置 `LD_LIBRARY_PATH` 以便链接器找到库
 
-## 配置文件
 
-首次运行 `annotask` 时，会在程序所在目录自动创建 `annotask.yaml` 配置文件。配置文件包含：
-
-- `db`: 全局数据库路径（记录所有任务）
-- `project`: 默认项目名称
-- `retry.max`: 最大重试次数
-- `queue`: SGE 默认队列（支持多个队列，逗号分隔）
-- `sge_project`: SGE 项目名称（用于资源配额管理，可选）
-- `node`: SGE 节点名称（qsubsge 模式会检查）
-- `defaults`: 各参数的默认值
-  - `line`: 默认行数
-  - `thread`: 默认并发数
-  - `cpu`: 默认CPU数
-
-**注意**：`mem` 和 `h_vmem` 不再在配置文件中设置，必须通过命令行参数显式指定。
-
-配置文件示例见 `annotask.yaml.example`。
-
-### 全局数据库权限设置
-
-如果多个用户或多进程需要访问全局数据库，需要设置相应的文件权限。假设全局数据库路径为 `/path/to/annotask.db`：
+## 卸载
 
 ```bash
-# 对上一级文件夹设置权限
-chmod 777 $(dirname /path/to/annotask.db)
-
-# 对数据库文件设置权限
-chmod 777 /path/to/annotask.db
+# 删除可执行文件
+rm $(go env GOPATH)/bin/annotask
 ```
 
-这样确保所有用户和进程都可以读取和写入全局数据库。
 
 # 使用方法
 
@@ -154,10 +105,10 @@ chmod 777 /path/to/annotask.db
 
 annotask 支持两种运行模式：
 
-1. **Local 模式**（默认）：在本地并行执行任务
-2. **QsubSge 模式**：将任务投递到 SGE 集群执行
+1. **local 模式**（默认）：在本地并行执行任务
+2. **qsubsge 模式**：将任务投递到 SGE 集群执行
 
-## Local 模式
+## local 模式
 
 ### 基本用法
 
@@ -168,7 +119,7 @@ annotask -i input.sh -l 2 -p 4 --project myproject
 ### 参数说明
 
 ```
--i, --infile    输入文件，shell脚本格式（必需）
+-i, --infile    输入文件，shell脚本（必需）
 -l, --line      每几行作为一个任务单元（默认：1）
 -p, --thread    最大并发任务数（默认：1）
     --project   项目名称（默认：从配置文件读取）
@@ -216,7 +167,7 @@ Err Shells:
     └── work_0005.sh.sign
 ```
 
-## QsubSge 模式
+## qsubsge 模式
 
 ### 基本用法
 
@@ -262,8 +213,10 @@ annotask qsubsge -i input.sh -P bioinformatics
 
 ### 注意事项
 
-- QsubSge 模式会检查当前节点是否与配置文件中的 `node` 一致
-- 如果不一致，程序会报错退出
+- qsubsge 模式会检查当前节点是否在配置文件中的 `node` 列表中，以防止在计算节点投递任务
+- 如果配置文件中设置了 `node` 列表，当前节点必须在列表中才能使用 qsubsge 模式
+- 如果 `node` 为空或不设置，则不对节点做限制
+- 如果当前节点不在允许的列表中，程序会报错退出
 - 任务会自动投递到 SGE 集群，输出文件会生成在子脚本所在目录（`{输入文件路径}.shell`）
 - 输出文件格式为 `{文件前缀}_0001.o.{jobID}` 和 `{文件前缀}_0001.e.{jobID}`
 - 例如：输入文件为 `input.sh`，子任务为 `input_0001.sh`，则输出文件为：
@@ -429,17 +382,16 @@ annotask在运行时会启动一个独立的goroutine实时监控任务状态，
 监控输出采用表格格式，包含以下列：
 
 ```
-try    task   status     retry  taskid     exitcode time        
-1:3    0001   Running    0      3652318    -        12-09 10:24 
-1:3    0002   Running    0      3652321    -        12-09 10:24 
-1:3    0003   Failed     1      3652312    1        12-09 10:25 
+try    task   status     taskid     exitcode time        
+1:3    0001   Running    3652318    -        12-09 10:24 
+1:3    0002   Running    3652321    -        12-09 10:24 
+1:3    0003   Failed     3652312    1        12-09 10:25 
 ```
 
 **列说明**：
 - `try`: 当前重试轮次/最大重试次数（例如：`1:3` 表示第1轮，最多3次）
 - `task`: 任务编号（4位数字，例如：`0001`）
 - `status`: 任务状态（Running, Failed, Finished）
-- `retry`: 当前重试次数
 - `taskid`: 任务ID（local模式为PID，qsubsge模式为Job ID）
 - `exitcode`: 退出码（如果任务已完成）
 - `time`: 时间（MM-DD HH:MM格式）
@@ -481,25 +433,12 @@ annotask在运行时会实时输出任务状态，采用表格格式显示。详
 
 如果任务失败，annotask会自动重试（最多3次），无需手动重新运行。
 
-## 编译错误: "drmaa.h: No such file or directory"
 
-**原因**: 系统未安装 DRMAA 开发库
+## QsubSge 模式报错: "current node is not in allowed nodes list"
 
-**解决方案**:
-- 如果不需要 qsubsge 模式，可以忽略此错误（不影响local模式）
-- 如果需要 qsubsge 模式，必须安装 DRMAA 库（通常随SGE系统一起安装）
-
-## 编译错误: "sqlite3.h: No such file or directory"
-
-**原因**: 系统未安装 SQLite3 开发库
-
-**解决方案**: 按照安装说明安装 libsqlite3-dev 或 sqlite-devel
-
-## QsubSge 模式报错: "current node does not match config node"
-
-**原因**: 当前节点与配置文件中的`node`设置不一致
+**原因**: 当前节点不在配置文件中的`node`列表中
 
 **解决方案**: 
-- 修改配置文件中的`node`为当前节点名称
-- 或者将`node`设置为空字符串（会自动使用当前主机名）
+- 在配置文件的`node`列表中添加当前节点名称（支持多个节点，列表格式）
+- 或者将`node`设置为空列表（`node: []`）或不设置，以移除节点限制
 

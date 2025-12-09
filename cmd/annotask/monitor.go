@@ -103,7 +103,7 @@ func MonitorTaskStatus(ctx context.Context, dbObj *MySql, globalDB *GlobalDB, us
 
 // printTaskHeader prints the table header for task status output
 func printTaskHeader(maxRetries int) {
-	fmt.Printf("%-6s %-6s %-10s %-6s %-10s %-8s %-12s\n", "try", "task", "status", "retry", "taskid", "exitcode", "time")
+	fmt.Printf("%-6s %-6s %-10s %-10s %-8s %-12s\n", "try", "task", "status", "taskid", "exitcode", "time")
 }
 
 // outputTaskStatus outputs task status to stdout in table format
@@ -140,7 +140,7 @@ func outputTaskStatus(ts TaskStatus, currentRound int, maxRetries int) {
 		timeStr = "-"
 	}
 
-	// Output in table format: try task status retry taskid exitcode time
-	fmt.Printf("%-6s %-6s %-10s %-6d %-10s %-8s %-12s\n",
-		tryStr, taskNumStr, ts.status, ts.retry, taskidStr, exitCodeStr, timeStr)
+	// Output in table format: try task status taskid exitcode time
+	fmt.Printf("%-6s %-6s %-10s %-10s %-8s %-12s\n",
+		tryStr, taskNumStr, ts.status, taskidStr, exitCodeStr, timeStr)
 }
