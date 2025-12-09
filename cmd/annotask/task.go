@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -18,13 +19,13 @@ import (
 	"github.com/seqyuan/annotask/pkg/gpool"
 )
 
-func IlterCommand(ctx context.Context, dbObj *MySql, thred int, need2run []int, mode JobMode, cpu, mem, h_vmem int, write_pool *gpool.Pool) {
+func IlterCommand(ctx context.Context, dbObj *MySql, thred int, need2run []int, mode JobMode, cpu, mem, h_vmem int, userSetMem, userSetHvmem bool, queue string, sgeProject string, write_pool *gpool.Pool) {
 	pool := gpool.New(thred)
 
 	for _, N := range need2run {
 		pool.Add(1)
 		if mode == ModeQsubSge {
-			go SubmitQsubCommand(ctx, N, pool, dbObj, write_pool, cpu, mem, h_vmem)
+			go SubmitQsubCommand(ctx, N, pool, dbObj, write_pool, cpu, mem, h_vmem, userSetMem, userSetHvmem, queue, sgeProject)
 		} else {
 			go RunCommand(N, pool, dbObj, write_pool)
 		}
@@ -115,7 +116,7 @@ func RunCommand(N int, pool *gpool.Pool, dbObj *MySql, write_pool *gpool.Pool) {
 	CheckErr(err)
 }
 
-func SubmitQsubCommand(ctx context.Context, N int, pool *gpool.Pool, dbObj *MySql, write_pool *gpool.Pool, cpu, mem, h_vmem int) {
+func SubmitQsubCommand(ctx context.Context, N int, pool *gpool.Pool, dbObj *MySql, write_pool *gpool.Pool, cpu, mem, h_vmem int, userSetMem, userSetHvmem bool, queue string, sgeProject string) {
 	defer pool.Done()
 
 	var subShellPath string
@@ -127,9 +128,17 @@ func SubmitQsubCommand(ctx context.Context, N int, pool *gpool.Pool, dbObj *MySq
 	CheckErr(err)
 
 	// If retry > 0, use stored memory values (may have been increased)
-	if retry > 0 && currentMem > 0 {
-		mem = currentMem
-		h_vmem = currentHvmem
+	// Only use stored values if user originally set the corresponding parameter
+	// This ensures we use the previously increased values for subsequent retries
+	if retry > 0 {
+		// Only update mem if user set it originally
+		if userSetMem && currentMem > 0 {
+			mem = currentMem
+		}
+		// Only update h_vmem if user set it originally
+		if userSetHvmem && currentHvmem > 0 {
+			h_vmem = currentHvmem
+		}
 	}
 
 	now := time.Now().Format("2006-01-02 15:04:05")
@@ -179,7 +188,22 @@ func SubmitQsubCommand(ctx context.Context, N int, pool *gpool.Pool, dbObj *MySq
 	// -cwd sets the working directory to subShellPath's directory
 	// SGE will automatically generate output files in the working directory:
 	// {job_name}.o.{jobID} and {job_name}.e.{jobID}
-	nativeSpec := fmt.Sprintf("-cwd %s -l cpu=%d -l mem=%dG -l h_vmem=%dG", subShellDir, cpu, mem, h_vmem)
+	// Only include mem and h_vmem if user explicitly set them
+	nativeSpec := fmt.Sprintf("-cwd %s -l cpu=%d", subShellDir, cpu)
+	if userSetMem {
+		nativeSpec += fmt.Sprintf(" -l mem=%dG", mem)
+	}
+	if userSetHvmem {
+		nativeSpec += fmt.Sprintf(" -l h_vmem=%dG", h_vmem)
+	}
+	// Add queue specification if provided (supports multiple queues, comma-separated)
+	if queue != "" {
+		nativeSpec += fmt.Sprintf(" -q %s", queue)
+	}
+	// Add SGE project specification if provided (for resource quota management)
+	if sgeProject != "" {
+		nativeSpec += fmt.Sprintf(" -P %s", sgeProject)
+	}
 	jt.SetNativeSpecification(nativeSpec)
 
 	// Submit job
@@ -308,9 +332,14 @@ func SubmitQsubCommand(ctx context.Context, N int, pool *gpool.Pool, dbObj *MySq
 				newMem := mem
 				newHvmem := h_vmem
 				if isMemoryError {
-					// Increase memory by 125%
-					newMem = int(float64(mem) * 1.25)
-					newHvmem = int(float64(h_vmem) * 1.25)
+					// Increase memory by 125% only if user set the corresponding parameter
+					// Round up to ensure we have enough memory
+					if userSetMem {
+						newMem = int(math.Ceil(float64(mem) * 1.25))
+					}
+					if userSetHvmem {
+						newHvmem = int(math.Ceil(float64(h_vmem) * 1.25))
+					}
 				}
 				_, err = dbObj.Db.Exec("UPDATE job set status=?, endtime=?, exitCode=?, retry=?, mem=?, h_vmem=?, node=? where subJob_num=?", J_failed, now, exitCode, retry, newMem, newHvmem, executionNode, N)
 			}

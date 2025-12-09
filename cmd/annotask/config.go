@@ -27,10 +27,10 @@ func LoadConfig() (*Config, error) {
 	config.Retry.Max = 3
 	config.Queue = "default.q"
 	config.Node = ""
+	config.SgeProject = ""
 	config.Defaults.Line = 1
 	config.Defaults.Thread = 1
 	config.Defaults.CPU = 1
-	config.Defaults.Mem = 1
 
 	// Try to load from file
 	if _, err := os.Stat(configPath); err == nil {

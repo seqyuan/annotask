@@ -43,14 +43,16 @@ func runLocalMode(config *Config, args []string) {
 		return
 	}
 
-	// For local mode, h_vmem is not used, but we still need to pass a value
-	// Use mem * 1.25 as default (though it won't be used in local mode)
-	h_vmem := int(float64(config.Defaults.Mem) * 1.25)
-	runTasks(config, *opt_i, *opt_l, *opt_p, *opt_project, ModeLocal, config.Defaults.CPU, config.Defaults.Mem, h_vmem)
+	// For local mode, mem and h_vmem are not used, but we still need to pass values
+	// Use placeholder values (won't be used in local mode)
+	mem := 1
+	h_vmem := 1
+	// Local mode doesn't use DRMAA, so mem/h_vmem/queue/sge-project flags are not relevant
+	runTasks(config, *opt_i, *opt_l, *opt_p, *opt_project, ModeLocal, config.Defaults.CPU, mem, h_vmem, false, false, "", "")
 }
 
 // runTasks is the common function to run tasks in both modes
-func runTasks(config *Config, infile string, line, thread int, project string, mode JobMode, cpu, mem, h_vmem int) {
+func runTasks(config *Config, infile string, line, thread int, project string, mode JobMode, cpu, mem, h_vmem int, userSetMem, userSetHvmem bool, queue string, sgeProject string) {
 
 	// Initialize global DB
 	globalDB, err := InitGlobalDB(config.Db)
@@ -82,7 +84,7 @@ func runTasks(config *Config, infile string, line, thread int, project string, m
 	// Retry loop for failed tasks
 	maxRetries := config.Retry.Max
 	for retryCount := 0; retryCount < maxRetries; retryCount++ {
-		IlterCommand(ctx, dbObj, thread, need2run, mode, cpu, mem, h_vmem, write_pool)
+		IlterCommand(ctx, dbObj, thread, need2run, mode, cpu, mem, h_vmem, userSetMem, userSetHvmem, queue, sgeProject, write_pool)
 		need2run = GetNeed2Run(dbObj)
 		if len(need2run) == 0 {
 			break

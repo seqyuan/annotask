@@ -15,6 +15,10 @@ retry:
 # Default queue for qsubsge mode
 queue: sci.q
 
+# SGE project name for qsubsge mode (optional, for resource quota management)
+# If not set, jobs will use default project or no project
+sge_project: ""
+
 # Node name for qsubsge mode
 # If empty, will use current hostname
 # In qsubsge mode, program will check if current node matches this value
@@ -25,7 +29,6 @@ defaults:
   line: 1      # Default number of lines to group as one task
   thread: 1    # Default max concurrent tasks
   cpu: 1       # Default CPU count (for qsubsge mode)
-  mem: 1       # Default memory in GB (for qsubsge mode)
-  # Note: h_vmem is not configured here. If not specified via --h_vmem,
-  # it will default to mem * 1.25
+  # Note: mem and h_vmem are not configured here. They must be explicitly set
+  # via --mem and --h_vmem flags if needed for qsubsge mode
 

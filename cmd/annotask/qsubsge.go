@@ -30,8 +30,29 @@ func runQsubSgeMode(config *Config, args []string) {
 	opt_p := parser.Int("p", "thread", &argparse.Options{Default: config.Defaults.Thread, Help: fmt.Sprintf("Max concurrent tasks to run (default: %d)", config.Defaults.Thread)})
 	opt_project := parser.String("", "project", &argparse.Options{Default: config.Project, Help: fmt.Sprintf("Project name (default: %s)", config.Project)})
 	opt_cpu := parser.Int("", "cpu", &argparse.Options{Default: config.Defaults.CPU, Help: fmt.Sprintf("Number of CPUs per task (default: %d)", config.Defaults.CPU)})
-	opt_mem := parser.Int("", "mem", &argparse.Options{Default: config.Defaults.Mem, Help: fmt.Sprintf("Memory in GB per task (default: %d)", config.Defaults.Mem)})
+	opt_mem := parser.Int("", "mem", &argparse.Options{Required: false, Help: "Memory in GB per task (only used if explicitly set)"})
 	opt_h_vmem := parser.Int("", "h_vmem", &argparse.Options{Required: false, Help: "Virtual memory in GB per task (default: mem * 1.25 if not set)"})
+	opt_queue := parser.String("", "queue", &argparse.Options{Default: config.Queue, Help: fmt.Sprintf("Queue name(s), comma-separated for multiple queues (default: %s)", config.Queue)})
+	// Format help message for sge-project
+	sgeProjectHelp := "SGE project name for resource quota management"
+	if config.SgeProject != "" {
+		sgeProjectHelp = fmt.Sprintf("%s (default: %s)", sgeProjectHelp, config.SgeProject)
+	} else {
+		sgeProjectHelp = fmt.Sprintf("%s (default: from config, or empty if not set)", sgeProjectHelp)
+	}
+	opt_sge_project := parser.String("P", "sge-project", &argparse.Options{Default: config.SgeProject, Help: sgeProjectHelp})
+
+	// Check if user explicitly set --mem or --h_vmem before parsing
+	userSetMem := false
+	userSetHvmem := false
+	for _, arg := range args {
+		if arg == "--mem" {
+			userSetMem = true
+		}
+		if arg == "--h_vmem" {
+			userSetHvmem = true
+		}
+	}
 
 	// Prepend program name for argparse.Parse (it expects os.Args-like format)
 	parseArgs := append([]string{"annotask"}, args...)
@@ -47,12 +68,25 @@ func runQsubSgeMode(config *Config, args []string) {
 		os.Exit(1)
 	}
 
-	// If h_vmem is not set (0), calculate as mem * 1.25
+	// Get mem and h_vmem values
+	mem := *opt_mem
 	h_vmem := *opt_h_vmem
-	if h_vmem == 0 {
-		h_vmem = int(float64(*opt_mem) * 1.25)
+	
+	// Note: We don't auto-calculate h_vmem from mem anymore.
+	// Only use values that user explicitly set via --mem or --h_vmem flags.
+
+	// Get queue value (uses config.Queue as default if not set)
+	queue := ""
+	if opt_queue != nil {
+		queue = *opt_queue
 	}
 
-	runTasks(config, *opt_i, *opt_l, *opt_p, *opt_project, ModeQsubSge, *opt_cpu, *opt_mem, h_vmem)
+	// Get SGE project value (uses config.SgeProject as default if not set)
+	sgeProject := ""
+	if opt_sge_project != nil {
+		sgeProject = *opt_sge_project
+	}
+
+	runTasks(config, *opt_i, *opt_l, *opt_p, *opt_project, ModeQsubSge, *opt_cpu, mem, h_vmem, userSetMem, userSetHvmem, queue, sgeProject)
 }
 

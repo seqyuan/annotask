@@ -14,13 +14,13 @@ type Config struct {
 	Retry   struct {
 		Max int `yaml:"max"`
 	} `yaml:"retry"`
-	Queue    string `yaml:"queue"`
-	Node     string `yaml:"node"`
+	Queue     string `yaml:"queue"`
+	Node      string `yaml:"node"`
+	SgeProject string `yaml:"sge_project"`
 	Defaults struct {
 		Line   int `yaml:"line"`
 		Thread int `yaml:"thread"`
 		CPU    int `yaml:"cpu"`
-		Mem    int `yaml:"mem"`
 	} `yaml:"defaults"`
 }
 
