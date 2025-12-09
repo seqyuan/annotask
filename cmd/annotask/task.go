@@ -417,4 +417,3 @@ func CheckExitCode(dbObj *MySql) {
 
 	os.Exit(exitCode)
 }
-

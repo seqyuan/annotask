@@ -89,4 +89,3 @@ func RunDeleteModule(config *Config, args []string) {
 		log.Fatalf("Delete command failed: %v", err)
 	}
 }
-

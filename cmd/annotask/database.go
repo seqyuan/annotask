@@ -61,7 +61,7 @@ func InitGlobalDB(dbPath string) (*GlobalDB, error) {
 			log.Printf("Warning: Could not rename basename to module: %v", err)
 		}
 	}
-	
+
 	// Migrate: add status column if it doesn't exist
 	var statusExists bool
 	err = conn.QueryRow("SELECT COUNT(*) FROM pragma_table_info('tasks') WHERE name='status'").Scan(&statusExists)
@@ -71,7 +71,7 @@ func InitGlobalDB(dbPath string) (*GlobalDB, error) {
 			log.Printf("Warning: Could not add status column: %v", err)
 		}
 	}
-	
+
 	// Migrate: add node column if it doesn't exist
 	var nodeExists bool
 	err = conn.QueryRow("SELECT COUNT(*) FROM pragma_table_info('tasks') WHERE name='node'").Scan(&nodeExists)
@@ -81,7 +81,7 @@ func InitGlobalDB(dbPath string) (*GlobalDB, error) {
 			log.Printf("Warning: Could not add node column: %v", err)
 		}
 	}
-	
+
 	_, err = conn.Exec(sql_table)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create table: %v", err)
@@ -281,4 +281,3 @@ func GetNodeName(mode string, config *Config, dbObj *MySql) string {
 	}
 	return "unknown"
 }
-

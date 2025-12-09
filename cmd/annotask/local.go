@@ -134,4 +134,3 @@ func runTasks(config *Config, infile string, line, thread int, project string, m
 
 	CheckExitCode(dbObj)
 }
-

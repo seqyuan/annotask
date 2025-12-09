@@ -77,7 +77,7 @@ CGO_ENABLED=1 go install github.com/seqyuan/annotask/cmd/annotask@latest
 export CGO_CFLAGS="-I/opt/gridengine/include"
 export CGO_LDFLAGS="-L/opt/gridengine/lib/lx-amd64 -ldrmaa"
 export LD_LIBRARY_PATH=/opt/gridengine/lib/lx-amd64:$LD_LIBRARY_PATH
-CGO_ENABLED=1 go install github.com/seqyuan/annotask/cmd/annotask@v1.7.6
+CGO_ENABLED=1 go install github.com/seqyuan/annotask/cmd/annotask@v1.7.7
 ```
 
 ```bash

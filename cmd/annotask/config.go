@@ -86,4 +86,3 @@ func CheckNode(configNode string) error {
 	}
 	return nil
 }
-

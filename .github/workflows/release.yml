@@ -1,71 +1,45 @@
 name: Release
+
 on:
   push:
     tags:
       - 'v*'
 
 jobs:
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v4
-        with:
-          go-version: '1.22'
-      - run: go test ./...
-
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v4
-        with:
-          go-version: '1.22'
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential sqlite3 libsqlite3-dev
-          go mod tidy
-          go get github.com/mattn/go-sqlite3@latest
-          go get github.com/akamensky/argparse@latest
-        
-      - name: Build
-        env:
-          CGO_ENABLED: 1
-        run: |
-          go build -tags cgo -v ./...
-
   release:
-    needs: [test, build]
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      packages: write
-      issues: write
-      pull-requests: write
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Set up Go
-        uses: actions/setup-go@v4
-        with:
-          go-version: '1.22'
+      - name: Get tag name
+        id: tag
+        run: echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
 
-      - name: Install cross-compile dependencies
+      - name: Create source archive
         run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-mingw-w64 sqlite3 libsqlite3-dev
+          TAG_NAME=${GITHUB_REF#refs/tags/}
+          git archive --format=tar.gz --prefix=annotask-$TAG_NAME/ HEAD > annotask-$TAG_NAME-source.tar.gz
+          git archive --format=zip --prefix=annotask-$TAG_NAME/ HEAD > annotask-$TAG_NAME-source.zip
 
-      - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v5
+      - name: Create checksums
+        run: |
+          sha256sum annotask-*-source.tar.gz annotask-*-source.zip > checksums.txt
+
+      - name: Create release
+        uses: softprops/action-gh-release@v1
         with:
-          distribution: goreleaser
-          version: latest
-          args: "release --clean"
+          files: |
+            annotask-*-source.tar.gz
+            annotask-*-source.zip
+            checksums.txt
+          draft: false
+          prerelease: false
+          generate_release_notes: true
         env:
-          GITHUB_TOKEN: ${{ secrets.PAT }}
-          CGO_ENABLED: 1
-          GO111MODULE: auto
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

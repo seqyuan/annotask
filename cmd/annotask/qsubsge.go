@@ -71,7 +71,7 @@ func runQsubSgeMode(config *Config, args []string) {
 	// Get mem and h_vmem values
 	mem := *opt_mem
 	h_vmem := *opt_h_vmem
-	
+
 	// Note: We don't auto-calculate h_vmem from mem anymore.
 	// Only use values that user explicitly set via --mem or --h_vmem flags.
 
@@ -89,4 +89,3 @@ func runQsubSgeMode(config *Config, args []string) {
 
 	runTasks(config, *opt_i, *opt_l, *opt_p, *opt_project, ModeQsubSge, *opt_cpu, mem, h_vmem, userSetMem, userSetHvmem, queue, sgeProject)
 }
-

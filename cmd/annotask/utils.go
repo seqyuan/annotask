@@ -31,22 +31,22 @@ func formatTimeShort(timeStr string) string {
 	if timeStr == "" || timeStr == "-" {
 		return "-"
 	}
-	
+
 	// Try different time formats
 	formats := []string{
 		"2006-01-02 15:04:05",
-		time.RFC3339,      // "2006-01-02T15:04:05Z07:00"
+		time.RFC3339, // "2006-01-02T15:04:05Z07:00"
 		"2006-01-02T15:04:05Z",
 		"2006-01-02T15:04:05",
 	}
-	
+
 	for _, format := range formats {
 		if t, err := time.Parse(format, timeStr); err == nil {
 			// Format without year and seconds: MM-DD HH:MM
 			return t.Format("01-02 15:04")
 		}
 	}
-	
+
 	// If parsing fails, try to extract manually (fallback)
 	// Handle ISO 8601 format: "2006-01-02T15:04:05Z"
 	if strings.Contains(timeStr, "T") {
@@ -72,8 +72,7 @@ func formatTimeShort(timeStr string) string {
 			}
 		}
 	}
-	
+
 	// If all parsing fails, return original string
 	return timeStr
 }
-

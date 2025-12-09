@@ -15,7 +15,7 @@ func MonitorTaskStatus(ctx context.Context, dbObj *MySql, globalDB *GlobalDB, us
 
 	// Map to track last known status for each task
 	lastStatus := make(map[int]TaskStatus)
-	headerPrinted := false // Track if header has been printed
+	headerPrinted := false                    // Track if header has been printed
 	ticker := time.NewTicker(1 * time.Second) // Check every second
 	defer ticker.Stop()
 
@@ -32,7 +32,7 @@ func MonitorTaskStatus(ctx context.Context, dbObj *MySql, globalDB *GlobalDB, us
 			}
 			currentRound := maxRetry + 1 // 0 -> 1, 1 -> 2, 2 -> 3
 			maxRetries := config.Retry.Max
-			
+
 			// Query all tasks
 			rows, err := dbObj.Db.Query(`
 				SELECT subJob_num, status, retry, taskid, starttime, endtime, exitCode 
@@ -110,7 +110,7 @@ func printTaskHeader(maxRetries int) {
 func outputTaskStatus(ts TaskStatus, currentRound int, maxRetries int) {
 	// Format try column (current round : max retries), e.g., "1:3", "2:3", "3:3"
 	tryStr := fmt.Sprintf("%d:%d", currentRound, maxRetries)
-	
+
 	// Format task number as 4-digit zero-padded (e.g., 0001, 0002)
 	taskNumStr := fmt.Sprintf("%04d", ts.subJobNum)
 
@@ -144,4 +144,3 @@ func outputTaskStatus(ts TaskStatus, currentRound int, maxRetries int) {
 	fmt.Printf("%-6s %-6s %-10s %-6d %-10s %-8s %-12s\n",
 		tryStr, taskNumStr, ts.status, ts.retry, taskidStr, exitCodeStr, timeStr)
 }
-

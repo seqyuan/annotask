@@ -127,4 +127,3 @@ func Creat_tb(shell_path string, line_unit int, mode JobMode) (dbObj *MySql) {
 	CheckErr(err)
 	return
 }
-
