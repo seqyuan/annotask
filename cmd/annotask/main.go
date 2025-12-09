@@ -8,7 +8,7 @@ import (
 
 // printModuleList prints list of available modules
 func printModuleList() {
-	fmt.Println("annotask - parallel task v1.7.2")
+	fmt.Println("annotask - parallel task v1.7.3")
 	fmt.Println()
 	fmt.Println("Available modules:")
 	fmt.Println("    local             Run tasks locally (default module)")
@@ -18,7 +18,7 @@ func printModuleList() {
 	fmt.Println()
 	fmt.Println("Usage:")
 	fmt.Println("    annotask                    Show this help")
-	fmt.Println("    annotask <module>            Run a module")
+	fmt.Println("    annotask <module>           Run a module")
 	fmt.Println("    annotask <module> --help    Show module-specific help")
 	fmt.Println("    annotask -i <file>          Run local module (default)")
 }

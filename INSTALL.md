@@ -14,8 +14,8 @@ export CGO_CFLAGS="-I/opt/gridengine/include"
 export CGO_LDFLAGS="-L/opt/gridengine/lib/lx-amd64 -ldrmaa -Wl,-rpath,/opt/gridengine/lib/lx-amd64"
 export LD_LIBRARY_PATH=/opt/gridengine/lib/lx-amd64:$LD_LIBRARY_PATH
 
-# 安装（编译后可直接运行，无需包装脚本）
-CGO_ENABLED=1 go install github.com/seqyuan/annotask/cmd/annotask@v1.7.1
+# 安装（从 GitHub 下载并编译指定版本）
+CGO_ENABLED=1 go install github.com/seqyuan/annotask/cmd/annotask@v1.7.3
 ```
 
 **优点**：编译后的二进制文件可直接运行，不需要运行时设置环境变量或包装脚本。
@@ -29,7 +29,11 @@ CGO_ENABLED=1 go install github.com/seqyuan/annotask/cmd/annotask@v1.7.1
 export CGO_CFLAGS="-I/opt/gridengine/include"
 export CGO_LDFLAGS="-L/opt/gridengine/lib/lx-amd64 -ldrmaa"
 export LD_LIBRARY_PATH=/opt/gridengine/lib/lx-amd64:$LD_LIBRARY_PATH
-CGO_ENABLED=1 go install github.com/seqyuan/annotask/cmd/annotask@v1.7.1
+CGO_ENABLED=1 go install github.com/seqyuan/annotask/cmd/annotask@v1.7.3
+```
+
+```bash
+mv /home/seqyuan/go/bin/annotask /home/seqyuan/go/bin/annotask_linux
 ```
 
 ```bash
@@ -49,7 +53,25 @@ export LD_LIBRARY_PATH=/opt/gridengine/lib/lx-amd64:$LD_LIBRARY_PATH
 chmod +x /home/seqyuan/go/bin/annotask
 ```
 
-## 如何查找环境变量
+
+## 全局数据库权限设置
+
+如果多个用户或多进程需要访问全局数据库（配置文件中 `db` 字段指定的路径），需要设置相应的文件权限：
+
+```bash
+# 假设全局数据库路径为 /path/to/annotask.db
+# 对上一级文件夹设置权限
+chmod 777 $(dirname /path/to/annotask.db)
+
+# 对数据库文件设置权限
+chmod 777 /path/to/annotask.db
+```
+
+这样确保所有用户和进程都可以读取和写入全局数据库。
+
+
+## Tips
+#### 如何查找环境变量
 
 如果不知道 Grid Engine 的安装路径，可以使用以下命令查找：
 
@@ -67,18 +89,5 @@ find /opt/gridengine -name "libdrmaa.so*" 2>/dev/null
 - 如果使用方法 1（rpath），在 `CGO_LDFLAGS` 中添加 `-Wl,-rpath,/opt/gridengine/lib/lx-amd64`
 - 编译时也需要设置 `LD_LIBRARY_PATH` 以便链接器找到库
 
-## 全局数据库权限设置
 
-如果多个用户或多进程需要访问全局数据库（配置文件中 `db` 字段指定的路径），需要设置相应的文件权限：
-
-```bash
-# 假设全局数据库路径为 /path/to/annotask.db
-# 对上一级文件夹设置权限
-chmod 777 $(dirname /path/to/annotask.db)
-
-# 对数据库文件设置权限
-chmod 777 /path/to/annotask.db
-```
-
-这样确保所有用户和进程都可以读取和写入全局数据库。
 

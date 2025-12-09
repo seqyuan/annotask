@@ -15,6 +15,7 @@ func MonitorTaskStatus(ctx context.Context, dbObj *MySql, globalDB *GlobalDB, us
 
 	// Map to track last known status for each task
 	lastStatus := make(map[int]TaskStatus)
+	headerPrinted := false // Track if header has been printed
 	ticker := time.NewTicker(1 * time.Second) // Check every second
 	defer ticker.Stop()
 
@@ -23,6 +24,15 @@ func MonitorTaskStatus(ctx context.Context, dbObj *MySql, globalDB *GlobalDB, us
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			// Get current try round (MAX(retry) + 1, because initial run has retry=0)
+			var maxRetry int
+			err := dbObj.Db.QueryRow("SELECT COALESCE(MAX(retry), -1) FROM job").Scan(&maxRetry)
+			if err != nil {
+				log.Printf("Error querying max retry: %v", err)
+			}
+			currentRound := maxRetry + 1 // 0 -> 1, 1 -> 2, 2 -> 3
+			maxRetries := config.Retry.Max
+			
 			// Query all tasks
 			rows, err := dbObj.Db.Query(`
 				SELECT subJob_num, status, retry, taskid, starttime, endtime, exitCode 
@@ -37,6 +47,12 @@ func MonitorTaskStatus(ctx context.Context, dbObj *MySql, globalDB *GlobalDB, us
 			// Track current status
 			currentStatus := make(map[int]TaskStatus)
 
+			// Print header on first iteration
+			if !headerPrinted {
+				printTaskHeader(maxRetries)
+				headerPrinted = true
+			}
+
 			for rows.Next() {
 				var ts TaskStatus
 				err := rows.Scan(&ts.subJobNum, &ts.status, &ts.retry, &ts.taskid, &ts.starttime, &ts.endtime, &ts.exitCode)
@@ -50,13 +66,13 @@ func MonitorTaskStatus(ctx context.Context, dbObj *MySql, globalDB *GlobalDB, us
 				last, exists := lastStatus[ts.subJobNum]
 				if !exists {
 					// New task, output initial status
-					outputTaskStatus(ts, true)
+					outputTaskStatus(ts, currentRound, maxRetries)
 				} else {
 					// Check if status, retry, or other fields changed
 					if last.status != ts.status || last.retry != ts.retry ||
 						last.taskid.String != ts.taskid.String ||
 						(ts.endtime.Valid && (!last.endtime.Valid || last.endtime.String != ts.endtime.String)) {
-						outputTaskStatus(ts, false)
+						outputTaskStatus(ts, currentRound, maxRetries)
 					}
 				}
 			}
@@ -80,8 +96,20 @@ func MonitorTaskStatus(ctx context.Context, dbObj *MySql, globalDB *GlobalDB, us
 	}
 }
 
-// outputTaskStatus outputs task status to stdout
-func outputTaskStatus(ts TaskStatus, isNew bool) {
+// printTaskHeader prints the table header for task status output
+func printTaskHeader(maxRetries int) {
+	fmt.Printf("%-6s %-6s %-10s %-6s %-10s %-8s %-12s\n", "try", "task", "status", "retry", "taskid", "exitcode", "time")
+}
+
+// outputTaskStatus outputs task status to stdout in table format
+func outputTaskStatus(ts TaskStatus, currentRound int, maxRetries int) {
+	// Format try column (current round : max retries), e.g., "1:3", "2:3", "3:3"
+	tryStr := fmt.Sprintf("%d:%d", currentRound, maxRetries)
+	
+	// Format task number as 4-digit zero-padded (e.g., 0001, 0002)
+	taskNumStr := fmt.Sprintf("%04d", ts.subJobNum)
+
+	// Format taskid
 	var taskidStr string
 	if ts.taskid.Valid {
 		taskidStr = ts.taskid.String
@@ -89,6 +117,7 @@ func outputTaskStatus(ts TaskStatus, isNew bool) {
 		taskidStr = "-"
 	}
 
+	// Format exit code
 	var exitCodeStr string
 	if ts.exitCode.Valid {
 		exitCodeStr = strconv.FormatInt(ts.exitCode.Int64, 10)
@@ -96,24 +125,18 @@ func outputTaskStatus(ts TaskStatus, isNew bool) {
 		exitCodeStr = "-"
 	}
 
+	// Format time using formatTimeShort (MM-DD HH:MM format)
 	var timeStr string
 	if ts.endtime.Valid {
-		timeStr = ts.endtime.String
+		timeStr = formatTimeShort(ts.endtime.String)
 	} else if ts.starttime.Valid {
-		timeStr = ts.starttime.String
+		timeStr = formatTimeShort(ts.starttime.String)
 	} else {
 		timeStr = "-"
 	}
 
-	prefix := ""
-	if isNew {
-		prefix = "[NEW] "
-	} else if ts.retry > 0 {
-		prefix = fmt.Sprintf("[RETRY-%d] ", ts.retry)
-	}
-
-	// Format: [PREFIX] Task #N: Status=STATUS, Retry=RETRY, TaskID=TASKID, ExitCode=EXITCODE, Time=TIME
-	fmt.Printf("%sTask #%d: Status=%s, Retry=%d, TaskID=%s, ExitCode=%s, Time=%s\n",
-		prefix, ts.subJobNum, ts.status, ts.retry, taskidStr, exitCodeStr, timeStr)
+	// Output in table format: try task status retry taskid exitcode time
+	fmt.Printf("%-6s %-6s %-10s %-6d %-10s %-8s %-12s\n",
+		tryStr, taskNumStr, ts.status, ts.retry, taskidStr, exitCodeStr, timeStr)
 }
 

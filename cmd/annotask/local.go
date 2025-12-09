@@ -87,7 +87,6 @@ func runTasks(config *Config, infile string, line, thread int, project string, m
 		if len(need2run) == 0 {
 			break
 		}
-		fmt.Printf("Retry round %d: %d tasks to retry\n", retryCount+1, len(need2run))
 		time.Sleep(2 * time.Second)
 	}
 
