@@ -122,9 +122,15 @@ find /opt/gridengine -name "libdrmaa.so*" 2>/dev/null
 - `db`: 全局数据库路径（记录所有任务）
 - `project`: 默认项目名称
 - `retry.max`: 最大重试次数
-- `queue`: SGE 默认队列
+- `queue`: SGE 默认队列（支持多个队列，逗号分隔）
+- `sge_project`: SGE 项目名称（用于资源配额管理，可选）
 - `node`: SGE 节点名称（qsubsge 模式会检查）
 - `defaults`: 各参数的默认值
+  - `line`: 默认行数
+  - `thread`: 默认并发数
+  - `cpu`: 默认CPU数
+
+**注意**：`mem` 和 `h_vmem` 不再在配置文件中设置，必须通过命令行参数显式指定。
 
 配置文件示例见 `annotask.yaml.example`。
 
@@ -215,11 +221,21 @@ Err Shells:
 ### 基本用法
 
 ```bash
-# 不指定 h_vmem，将自动使用 mem * 1.25
+# 只设置 mem，DRMAA 投递时只使用 -l mem
 annotask qsubsge -i input.sh -l 2 -p 4 --project myproject --cpu 2 --mem 4
 
-# 或者手动指定 h_vmem
+# 只设置 h_vmem，DRMAA 投递时只使用 -l h_vmem
+annotask qsubsge -i input.sh -l 2 -p 4 --project myproject --cpu 2 --h_vmem 8
+
+# 同时设置 mem 和 h_vmem
 annotask qsubsge -i input.sh -l 2 -p 4 --project myproject --cpu 2 --mem 4 --h_vmem 8
+
+# 指定队列（单个或多个，逗号分隔）
+annotask qsubsge -i input.sh --queue sci.q
+annotask qsubsge -i input.sh --queue trans.q,nassci.q,sci.q
+
+# 指定 SGE 项目（用于资源配额管理）
+annotask qsubsge -i input.sh -P bioinformatics
 ```
 
 ### 参数说明
@@ -230,9 +246,19 @@ annotask qsubsge -i input.sh -l 2 -p 4 --project myproject --cpu 2 --mem 4 --h_v
 -p, --thread    最大并发任务数（默认：从配置文件读取）
     --project   项目名称（默认：从配置文件读取）
     --cpu       CPU数量（默认：从配置文件读取）
-    --mem       内存大小（GB，默认：从配置文件读取）
-    --h_vmem    虚拟内存大小（GB，可选，不设置时默认为 mem * 1.25）
+    --mem       内存大小（GB，仅在显式设置时在DRMAA中使用）
+    --h_vmem    虚拟内存大小（GB，仅在显式设置时在DRMAA中使用）
+    --queue     队列名称（多个队列用逗号分隔，默认：从配置文件读取）
+    -P, --sge-project  SGE项目名称（用于资源配额管理，默认：从配置文件读取）
 ```
+
+**重要说明**：
+- `--mem` 和 `--h_vmem` 参数只有在用户显式设置时，才会在 DRMAA 投递时使用
+- 如果只设置了 `--mem`，DRMAA 投递时只包含 `-l mem=XG`，不包含 `-l h_vmem`
+- 如果只设置了 `--h_vmem`，DRMAA 投递时只包含 `-l h_vmem=XG`，不包含 `-l mem`
+- 如果都不设置，DRMAA 投递时不会包含内存相关参数
+- `--queue` 支持多个队列，用逗号分隔（例如：`trans.q,nassci.q,sci.q`）
+- `-P/--sge-project` 用于 SGE 资源配额管理，如果未设置则不在 DRMAA 中使用 `-P` 参数
 
 ### 注意事项
 
@@ -357,8 +383,8 @@ starttime   DATETIME                           # 开始时间
 endtime     DATETIME                           # 结束时间
 mode        TEXT DEFAULT 'local'               # 运行模式（local/qsubsge）
 cpu         INTEGER DEFAULT 1                 # CPU数量（qsubsge模式）
-mem         INTEGER DEFAULT 1                 # 内存大小（GB，qsubsge模式）
-h_vmem      INTEGER DEFAULT 1                 # 虚拟内存大小（GB，qsubsge模式，未设置时默认为mem*1.25）
+mem         INTEGER DEFAULT 1                 # 内存大小（GB，qsubsge模式，仅在用户显式设置时使用）
+h_vmem      INTEGER DEFAULT 1                 # 虚拟内存大小（GB，qsubsge模式，仅在用户显式设置时使用）
 taskid      TEXT                               # 任务ID（local模式为PID，qsubsge模式为Job ID）
 ```
 
@@ -396,12 +422,32 @@ finishedTasks   INTEGER DEFAULT 0               # Finished状态任务数
 
 ## 实时监控
 
-annotask在运行时会启动一个独立的goroutine实时监控任务状态，并将状态变化输出到标准输出，包括：
+annotask在运行时会启动一个独立的goroutine实时监控任务状态，并将状态变化以表格格式输出到标准输出。
 
-- 新任务启动（标记为 `[NEW]`）
-- 任务状态变化
-- 任务重试（标记为 `[RETRY-N]`，N为重试次数）
-- 任务完成或失败
+### 监控输出格式
+
+监控输出采用表格格式，包含以下列：
+
+```
+try    task   status     retry  taskid     exitcode time        
+1:3    0001   Running    0      3652318    -        12-09 10:24 
+1:3    0002   Running    0      3652321    -        12-09 10:24 
+1:3    0003   Failed     1      3652312    1        12-09 10:25 
+```
+
+**列说明**：
+- `try`: 当前重试轮次/最大重试次数（例如：`1:3` 表示第1轮，最多3次）
+- `task`: 任务编号（4位数字，例如：`0001`）
+- `status`: 任务状态（Running, Failed, Finished）
+- `retry`: 当前重试次数
+- `taskid`: 任务ID（local模式为PID，qsubsge模式为Job ID）
+- `exitcode`: 退出码（如果任务已完成）
+- `time`: 时间（MM-DD HH:MM格式）
+
+**注意**：
+- 表头只在第一次输出时显示一次
+- Pending 状态的任务不会显示在监控输出中
+- 时间格式为"月-日 时:分"（例如：`12-09 10:24`）
 
 # 功能特性
 
@@ -416,18 +462,16 @@ annotask在运行时会启动一个独立的goroutine实时监控任务状态，
 在qsubsge模式下，如果任务因为内存不足被kill（退出码137或错误日志中包含内存相关关键词），annotask会自动：
 
 1. 检测内存错误
-2. 将`mem`和`h_vmem`增加125%
+2. 根据用户设置的参数，只增加相应参数的内存（向上取整）：
+   - 如果用户只设置了 `--mem`，只增加 `mem`（增加125%，向上取整）
+   - 如果用户只设置了 `--h_vmem`，只增加 `h_vmem`（增加125%，向上取整）
+   - 如果用户同时设置了两个参数，两个都增加（增加125%，向上取整）
+   - 如果用户都没有设置，不进行内存增加
 3. 重新投递任务
 
 ## 任务状态监控
 
-annotask在运行时会实时输出任务状态，格式如下：
-
-```
-[NEW] Task 1: Pending -> Running (PID: 12345)
-Task 2: Running -> Finished (Exit: 0)
-[RETRY-1] Task 3: Failed -> Running (PID: 12346)
-```
+annotask在运行时会实时输出任务状态，采用表格格式显示。详见"实时监控"章节。
 
 # 常见问题
 
