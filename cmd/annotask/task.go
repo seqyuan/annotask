@@ -237,13 +237,13 @@ func SubmitQsubCommand(ctx context.Context, N int, pool *gpool.Pool, dbObj *MySq
 	// {subShellBaseNoExt}.o.{jobID} and {subShellBaseNoExt}.e.{jobID}
 	jt.SetJobName(subShellBaseNoExt)
 
-	// Set resource requirements and working directory
-	// -cwd sets the working directory to subShellPath's directory
+	// Set resource requirements in nativeSpec
 	// SGE will automatically generate output files in the working directory:
 	// {job_name}.o.{jobID} and {job_name}.e.{jobID}
 	// Only include mem and h_vmem if user explicitly set them
-	// Note: SGE nativeSpec doesn't support quotes, so paths with spaces may cause issues
-	nativeSpec := fmt.Sprintf("-cwd %s -l cpu=%d", subShellDir, cpu)
+	// Note: Try without -cwd first, as DRMAA may handle working directory automatically
+	// If this doesn't work, we may need to add -cwd back with proper escaping
+	nativeSpec := fmt.Sprintf("-l cpu=%d", cpu)
 	if userSetMem {
 		nativeSpec += fmt.Sprintf(" -l mem=%dG", mem)
 	}
@@ -258,7 +258,14 @@ func SubmitQsubCommand(ctx context.Context, N int, pool *gpool.Pool, dbObj *MySq
 	if sgeProject != "" {
 		nativeSpec += fmt.Sprintf(" -P %s", sgeProject)
 	}
+	// Try adding -cwd with proper path handling
+	// Escape any special characters in the path
+	// Note: SGE nativeSpec may require the path to be unquoted
+	nativeSpec += fmt.Sprintf(" -cwd %s", subShellDir)
 	jt.SetNativeSpecification(nativeSpec)
+	
+	// Debug: log nativeSpec for troubleshooting
+	log.Printf("DEBUG: Task %d - nativeSpec: %s, subShellPath: %s, subShellDir: %s", N, nativeSpec, subShellPath, subShellDir)
 
 	// Submit job
 	jobID, err := session.RunJob(&jt)
