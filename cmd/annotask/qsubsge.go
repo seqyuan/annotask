@@ -88,4 +88,7 @@ func runQsubSgeMode(config *Config, args []string) {
 	}
 
 	runTasks(config, *opt_i, *opt_l, *opt_p, *opt_project, ModeQsubSge, *opt_cpu, mem, h_vmem, userSetMem, userSetHvmem, queue, sgeProject)
+	
+	// Close DRMAA session when qsubsge mode completes
+	closeDRMAASession()
 }

@@ -12,12 +12,48 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
 	"github.com/dgruber/drmaa"
 	"github.com/seqyuan/annotask/pkg/gpool"
 )
+
+// Global DRMAA session manager
+var (
+	drmaaSession     drmaa.Session
+	drmaaSessionMutex sync.Mutex
+	drmaaSessionInit  bool
+)
+
+// getDRMAASession returns a global DRMAA session (thread-safe)
+func getDRMAASession() (*drmaa.Session, error) {
+	drmaaSessionMutex.Lock()
+	defer drmaaSessionMutex.Unlock()
+
+	if !drmaaSessionInit {
+		session, err := drmaa.MakeSession()
+		if err != nil {
+			return nil, err
+		}
+		drmaaSession = session
+		drmaaSessionInit = true
+	}
+
+	return &drmaaSession, nil
+}
+
+// closeDRMAASession closes the global DRMAA session (should be called at program exit)
+func closeDRMAASession() {
+	drmaaSessionMutex.Lock()
+	defer drmaaSessionMutex.Unlock()
+
+	if drmaaSessionInit {
+		drmaaSession.Exit()
+		drmaaSessionInit = false
+	}
+}
 
 func IlterCommand(ctx context.Context, dbObj *MySql, thred int, need2run []int, mode JobMode, cpu, mem, h_vmem int, userSetMem, userSetHvmem bool, queue string, sgeProject string, write_pool *gpool.Pool) {
 	pool := gpool.New(thred)
@@ -147,8 +183,8 @@ func SubmitQsubCommand(ctx context.Context, N int, pool *gpool.Pool, dbObj *MySq
 	CheckErr(err)
 	write_pool.Done()
 
-	// Initialize DRMAA session
-	session, err := drmaa.MakeSession()
+	// Get global DRMAA session (thread-safe)
+	session, err := getDRMAASession()
 	if err != nil {
 		write_pool.Add(1)
 		now = time.Now().Format("2006-01-02 15:04:05")
@@ -160,13 +196,14 @@ func SubmitQsubCommand(ctx context.Context, N int, pool *gpool.Pool, dbObj *MySq
 			log.Printf("Error updating database: %v", dbErr)
 		}
 		if drmaaErr != nil {
-			log.Printf("Error creating DRMAA session: %v", drmaaErr)
+			log.Printf("Error getting DRMAA session: %v", drmaaErr)
 		} else {
-			log.Printf("Error creating DRMAA session: unknown error (err is nil)")
+			log.Printf("Error getting DRMAA session: unknown error (err is nil)")
 		}
 		return
 	}
-	defer session.Exit()
+	// Note: We don't defer session.Exit() here because it's a global session
+	// that should remain open for the lifetime of the program
 
 	// Create job template
 	jt, err := session.AllocateJobTemplate()
@@ -205,6 +242,7 @@ func SubmitQsubCommand(ctx context.Context, N int, pool *gpool.Pool, dbObj *MySq
 	// SGE will automatically generate output files in the working directory:
 	// {job_name}.o.{jobID} and {job_name}.e.{jobID}
 	// Only include mem and h_vmem if user explicitly set them
+	// Note: SGE nativeSpec doesn't support quotes, so paths with spaces may cause issues
 	nativeSpec := fmt.Sprintf("-cwd %s -l cpu=%d", subShellDir, cpu)
 	if userSetMem {
 		nativeSpec += fmt.Sprintf(" -l mem=%dG", mem)
