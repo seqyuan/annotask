@@ -232,17 +232,19 @@ func SubmitQsubCommand(ctx context.Context, N int, pool *gpool.Pool, dbObj *MySq
 	subShellBaseNoExt := strings.TrimSuffix(subShellBase, filepath.Ext(subShellBase))
 
 	// Set job template properties
+	// Note: SetRemoteCommand sets the script path, which SGE will use as the command to execute
+	// The working directory will be automatically set to the script's directory by SGE
 	jt.SetRemoteCommand(subShellPath)
 	// Set job name to file prefix, so SGE will auto-generate output files as:
 	// {subShellBaseNoExt}.o.{jobID} and {subShellBaseNoExt}.e.{jobID}
 	jt.SetJobName(subShellBaseNoExt)
 
-	// Set resource requirements in nativeSpec
-	// SGE will automatically generate output files in the working directory:
-	// {job_name}.o.{jobID} and {job_name}.e.{jobID}
-	// Only include mem and h_vmem if user explicitly set them
-	// Note: Try without -cwd first, as DRMAA may handle working directory automatically
-	// If this doesn't work, we may need to add -cwd back with proper escaping
+	// Build nativeSpec with only SGE resource options
+	// Do NOT include -cwd or script path in nativeSpec
+	// - SetRemoteCommand already sets the script path, which SGE uses to determine working directory
+	// - SGE automatically uses the script's directory as the working directory
+	// - Output files will be generated in the script's directory: {job_name}.o.{jobID} and {job_name}.e.{jobID}
+	// - Including -cwd in nativeSpec may cause parsing errors with some DRMAA implementations
 	nativeSpec := fmt.Sprintf("-l cpu=%d", cpu)
 	if userSetMem {
 		nativeSpec += fmt.Sprintf(" -l mem=%dG", mem)
@@ -258,10 +260,6 @@ func SubmitQsubCommand(ctx context.Context, N int, pool *gpool.Pool, dbObj *MySq
 	if sgeProject != "" {
 		nativeSpec += fmt.Sprintf(" -P %s", sgeProject)
 	}
-	// Try adding -cwd with proper path handling
-	// Escape any special characters in the path
-	// Note: SGE nativeSpec may require the path to be unquoted
-	nativeSpec += fmt.Sprintf(" -cwd %s", subShellDir)
 	jt.SetNativeSpecification(nativeSpec)
 	
 	// Debug: log nativeSpec for troubleshooting
