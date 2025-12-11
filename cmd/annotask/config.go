@@ -43,7 +43,9 @@ func LoadConfig() (*Config, error) {
 	config.MonitorUpdateInterval = 60 // Default: update every 60 seconds (1 minute)
 
 	// First, load from executable directory config (if exists)
+	// If it doesn't exist, create a default one
 	if _, err := os.Stat(exeConfigPath); err == nil {
+		// Config file exists, load it
 		data, err := os.ReadFile(exeConfigPath)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read executable config file: %v", err)
@@ -54,6 +56,32 @@ func LoadConfig() (*Config, error) {
 		}
 		// Merge executable config (only non-empty values)
 		mergeConfig(config, &exeConfig)
+	} else {
+		// Config file doesn't exist, create a default one
+		// Create a default config for executable directory
+		defaultExeConfig := &Config{
+			Db:      filepath.Join(exeDir, "annotask.db"),
+			Project: "default",
+		}
+		defaultExeConfig.Retry.Max = 3
+		defaultExeConfig.Queue = "default.q"
+		defaultExeConfig.Node = []string{}
+		defaultExeConfig.SgeProject = ""
+		defaultExeConfig.Defaults.Line = 1
+		defaultExeConfig.Defaults.Thread = 1
+		defaultExeConfig.Defaults.CPU = 1
+		defaultExeConfig.MonitorUpdateInterval = 60
+
+		data, err := yaml.Marshal(defaultExeConfig)
+		if err != nil {
+			log.Printf("Warning: Could not marshal default executable config: %v", err)
+		} else {
+			if err := os.WriteFile(exeConfigPath, data, 0644); err != nil {
+				log.Printf("Warning: Could not write default executable config file: %v", err)
+			} else {
+				log.Printf("Created default config file: %s", exeConfigPath)
+			}
+		}
 	}
 
 	// Then, load from user home config (if exists) - this takes precedence
