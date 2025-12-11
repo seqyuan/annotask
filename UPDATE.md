@@ -8,11 +8,54 @@
 
 ### 🎯 重大改进
 
+#### 参考 goqsub 的投递模式优化
+- **内存参数映射修正**：
+  - `--mem` 参数现在映射到 SGE 的 `vf` 资源（虚拟内存），DRMAA 投递时使用 `-l vf=XG`
+  - `--h_vmem` 参数映射到 SGE 的 `h_vmem` 资源（硬虚拟内存限制），DRMAA 投递时使用 `-l h_vmem=XG`
+  - 修正了之前使用 `-l mem=XG` 的错误，现在与 [goqsub](https://github.com/seqyuan/goqsub) 保持一致
+- **参数行为保持一致**：
+  - 如果只设置了 `--mem`，DRMAA 投递时只包含 `-l vf=XG`，不包含 `-l h_vmem`
+  - 如果只设置了 `--h_vmem`，DRMAA 投递时只包含 `-l h_vmem=XG`，不包含 `-l vf`
+  - 如果都不设置，DRMAA 投递时不会包含内存相关参数
+
+#### 并行环境模式支持
+- **添加 `--pesmp` 参数**：支持两种并行环境投递模式
+  - **默认模式**（不设置 `--pesmp`）：使用 `-l p=X` 指定 CPU 数量
+    - 示例：`--cpu 4 --h_vmem 18` → `-l h_vmem=18G,p=4`
+  - **PE SMP 模式**（设置 `--pesmp`）：使用 `-pe smp X` 指定 CPU 数量
+    - 示例：`--cpu 4 --h_vmem 5 --pesmp` → `-l h_vmem=5G -pe smp 4`
+- **灵活的资源指定**：
+  - CPU 数量通过 `--cpu` 参数指定
+  - 内存参数（`--mem` 和 `--h_vmem`）根据用户显式设置的情况添加到 `-l` 规范中
+  - 两种模式都支持所有其他参数（队列、SGE 项目等）
+
+### 📝 详细变更
+
+1. **代码修改**
+   - `task.go`: 将 `-l mem=%dG` 改为 `-l vf=%dG`，与 goqsub 保持一致
+   - `task.go`: 添加并行环境模式支持，根据 `--pesmp` 参数选择使用 `-l p=X` 或 `-pe smp X`
+   - `qsubsge.go`: 添加 `--pesmp` 标志参数
+   - `local.go`: 更新函数签名，添加 `usePesmp` 参数
+   - 添加注释说明参数映射关系和并行环境模式
+
+2. **文档更新**
+   - 更新 `main.go` 中的帮助信息，明确说明 `--mem` 映射到 `vf`，`--h_vmem` 映射到 `h_vmem`，添加 `--pesmp` 说明
+   - 更新 `qsubsge.go` 中的参数帮助信息
+   - 更新 `README.md` 中的参数说明、重要说明部分和并行环境模式说明
+
+---
+
+## v1.7.1 (2025-12)
+
+### 🎯 重大改进
+
 #### QsubSGE 模式参数优化
 - **内存参数行为变更**：
   - `--mem` 和 `--h_vmem` 参数现在只在用户显式设置时才会在 DRMAA 投递时使用
-  - 如果用户只设置了 `--mem`，DRMAA 投递时只包含 `-l mem=XG`，不包含 `-l h_vmem`
-  - 如果用户只设置了 `--h_vmem`，DRMAA 投递时只包含 `-l h_vmem=XG`，不包含 `-l mem`
+  - `--mem` 对应 SGE 的 `vf` 资源（虚拟内存），DRMAA 投递时使用 `-l vf=XG`
+  - `--h_vmem` 对应 SGE 的 `h_vmem` 资源（硬虚拟内存限制），DRMAA 投递时使用 `-l h_vmem=XG`
+  - 如果用户只设置了 `--mem`，DRMAA 投递时只包含 `-l vf=XG`，不包含 `-l h_vmem`
+  - 如果用户只设置了 `--h_vmem`，DRMAA 投递时只包含 `-l h_vmem=XG`，不包含 `-l vf`
   - 如果都不设置，DRMAA 投递时不会包含内存相关参数
 - **移除配置文件中的 mem 字段**：
   - 配置文件不再包含 `defaults.mem` 字段

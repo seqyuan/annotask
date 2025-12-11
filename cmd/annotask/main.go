@@ -8,7 +8,7 @@ import (
 
 // printModuleList prints list of available modules
 func printModuleList() {
-	fmt.Println("annotask - parallel task v1.7.11")
+	fmt.Println("annotask - parallel task v1.8.0")
 	fmt.Println()
 	fmt.Println("Available modules:")
 	fmt.Println("    local             Run tasks locally (default module)")
@@ -52,10 +52,11 @@ func printModuleHelp(module string, config *Config) {
 		fmt.Println("    -p, --thread      Max concurrent tasks to run (default: 1)")
 		fmt.Println("    --project         Project name (default: default)")
 		fmt.Println("    --cpu             Number of CPUs per task (default: 1)")
-		fmt.Println("    --mem             Memory in GB per task (default: 1)")
-		fmt.Println("    --h_vmem          Virtual memory in GB per task (default: mem * 1.25)")
+		fmt.Println("    --mem             Virtual memory (vf) in GB per task (only used if explicitly set)")
+		fmt.Println("    --h_vmem          Hard virtual memory limit (h_vmem) in GB per task (only used if explicitly set)")
 		fmt.Println("    --queue            Queue name(s), comma-separated for multiple queues (default: from config)")
 		fmt.Println("    -P, --sge-project  SGE project name for resource quota management (default: from config)")
+		fmt.Println("    --pesmp            Use -pe smp parallel environment mode (default: use -l p=X mode)")
 	case "stat":
 		fmt.Println("annotask stat - Query task status from global database")
 		fmt.Println()

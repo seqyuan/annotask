@@ -34,7 +34,7 @@ export CGO_LDFLAGS="-L/opt/gridengine/lib/lx-amd64 -ldrmaa -Wl,-rpath,/opt/gride
 export LD_LIBRARY_PATH=/opt/gridengine/lib/lx-amd64:$LD_LIBRARY_PATH
 
 # 安装（从 GitHub 下载并编译指定版本）
-CGO_ENABLED=1 go install github.com/seqyuan/annotask/cmd/annotask@v1.7.12
+CGO_ENABLED=1 go install github.com/seqyuan/annotask/cmd/annotask@v1.8.0
 ```
 
 ```bash
@@ -172,10 +172,10 @@ Err Shells:
 ### 基本用法
 
 ```bash
-# 只设置 mem，DRMAA 投递时只使用 -l mem
+# 只设置 mem，DRMAA 投递时只使用 -l vf=XG（虚拟内存）
 annotask qsubsge -i input.sh -l 2 -p 4 --project myproject --cpu 2 --mem 4
 
-# 只设置 h_vmem，DRMAA 投递时只使用 -l h_vmem
+# 只设置 h_vmem，DRMAA 投递时只使用 -l h_vmem=XG（硬虚拟内存限制）
 annotask qsubsge -i input.sh -l 2 -p 4 --project myproject --cpu 2 --h_vmem 8
 
 # 同时设置 mem 和 h_vmem
@@ -187,6 +187,9 @@ annotask qsubsge -i input.sh --queue trans.q,nassci.q,sci.q
 
 # 指定 SGE 项目（用于资源配额管理）
 annotask qsubsge -i input.sh -P bioinformatics
+
+# 使用 -pe smp 并行环境模式（默认使用 -l p=X 模式）
+annotask qsubsge -i input.sh --cpu 4 --h_vmem 5 --pesmp
 ```
 
 ### 参数说明
@@ -197,19 +200,30 @@ annotask qsubsge -i input.sh -P bioinformatics
 -p, --thread    最大并发任务数（默认：从配置文件读取）
     --project   项目名称（默认：从配置文件读取）
     --cpu       CPU数量（默认：从配置文件读取）
-    --mem       内存大小（GB，仅在显式设置时在DRMAA中使用）
-    --h_vmem    虚拟内存大小（GB，仅在显式设置时在DRMAA中使用）
+    --mem       虚拟内存（vf）大小（GB，映射到 -l vf=XG，仅在显式设置时在DRMAA中使用）
+    --h_vmem    硬虚拟内存限制（h_vmem）大小（GB，映射到 -l h_vmem=XG，仅在显式设置时在DRMAA中使用）
     --queue     队列名称（多个队列用逗号分隔，默认：从配置文件读取）
     -P, --sge-project  SGE项目名称（用于资源配额管理，默认：从配置文件读取）
+    --pesmp     使用 -pe smp 并行环境模式（默认：使用 -l p=X 模式）
 ```
 
 **重要说明**：
 - `--mem` 和 `--h_vmem` 参数只有在用户显式设置时，才会在 DRMAA 投递时使用
-- 如果只设置了 `--mem`，DRMAA 投递时只包含 `-l mem=XG`，不包含 `-l h_vmem`
-- 如果只设置了 `--h_vmem`，DRMAA 投递时只包含 `-l h_vmem=XG`，不包含 `-l mem`
+- `--mem` 对应 SGE 的 `vf` 资源（虚拟内存），DRMAA 投递时使用 `-l vf=XG`
+- `--h_vmem` 对应 SGE 的 `h_vmem` 资源（硬虚拟内存限制），DRMAA 投递时使用 `-l h_vmem=XG`
+- 如果只设置了 `--mem`，DRMAA 投递时只包含 `-l vf=XG`，不包含 `-l h_vmem`
+- 如果只设置了 `--h_vmem`，DRMAA 投递时只包含 `-l h_vmem=XG`，不包含 `-l vf`
 - 如果都不设置，DRMAA 投递时不会包含内存相关参数
 - `--queue` 支持多个队列，用逗号分隔（例如：`trans.q,nassci.q,sci.q`）
 - `-P/--sge-project` 用于 SGE 资源配额管理，如果未设置则不在 DRMAA 中使用 `-P` 参数
+
+**并行环境模式**：
+- **默认模式**（不设置 `--pesmp`）：使用 `-l p=X` 指定 CPU 数量
+  - 示例：`--cpu 4 --h_vmem 18` → `-l h_vmem=18G,p=4`
+  - 这里内存指的总内存
+- **PE SMP 模式**（设置 `--pesmp`）：使用 `-pe smp X` 指定 CPU 数量
+  - 示例：`--cpu 4 --h_vmem 5 --pesmp` → `-l h_vmem=5G -pe smp 4`
+  - 这里的内存指的是单cpu需要消耗的内存
 
 ### 注意事项
 
@@ -228,21 +242,19 @@ annotask qsubsge -i input.sh -P bioinformatics
 `-i` 参数为一个shell脚本，例如`input.sh`这个shell脚本的内容示例如下：
 
 ```
-echo 1
-echo 11
-echo 2
-sddf
-echo 3
-grep -h
-echo 4
-echo 44
-echo 5
-echo 6
+blastn -db /seqyuan/nt -evalue 0.001 -outfmt 5  -query sample1_1.fasta -out sample1_1.xml -num_threads 4
+python3 /seqyuan/bin/blast_xml2txt.py -i sample1_1.xml -o sample1_1.txt
+blastn -db /seqyuan/nt -evalue 0.001 -outfmt 5  -query sample2_1.fasta -out sample2_1.xml -num_threads 4
+python3 /seqyuan/bin/blast_xml2txt.py -i sample2_1.xml -o sample2_1.txt
+blastn -db /seqyuan/nt -evalue 0.001 -outfmt 5  -query sample3_1.fasta -out sample3_1.xml -num_threads 4
+python3 /seqyuan/bin/blast_xml2txt.py -i sample3_1.xml -o sample3_1.txt
+blastn -db /seqyuan/nt -evalue 0.001 -outfmt 5  -query sample4_1.fasta -out sample4_1.xml -num_threads 4
+python3 /seqyuan/bin/blast_xml2txt.py -i sample4_1.xml -o sample4_1.txt
 ```
 
 ### -l 参数说明
 
-依照上面的示例，一共有10行命令，如果设置 `-l 2`，则每2行作为1个单位并行的执行。
+依照上面的示例，一共有8行命令，如果设置 `-l 2`，则每2行作为1个单位并行的执行。
 
 ### -p 参数说明
 
@@ -266,16 +278,20 @@ annotask stat
 
 示例输出：
 ```
-Tasks for user: username
-----------------------------------------------------------------------------------------------------------------------
-Project         Module                Mode       Pending    Failed     Running    Finished   Start Time  End Time
-----------------------------------------------------------------------------------------------------------------------
-myproject       input                 local      0          0          0          5          12-25 14:30  12-25 15:45
-myproject       process               qsubsge    2          1          3          10         12-26 09:15  -
-testproject     analysis              local      0          0          0          8          12-24 10:20  12-24 11:30
-----------------------------------------------------------------------------------------------------------------------
-Total records: 3
+project          module               mode       status     statis          stime        etime       
+myproject        input                local      -          5/0             12-25 14:30  12-25 15:45
+myproject        process              qsubsge    -          16/2            12-26 09:15  -
+testproject      analysis             local      -          8/0             12-24 10:20  12-24 11:30
 ```
+
+**输出说明**：
+- `project`: 项目名称
+- `module`: 模块名称（基于输入文件名）
+- `mode`: 执行模式（local 或 qsubsge）
+- `status`: 任务状态（可能为 "-"）
+- `statis`: 任务统计，格式为 `总任务数/待处理任务数`（例如：`16/2` 表示总共16个任务，2个待处理）
+- `stime`: 开始时间（格式：MM-DD HH:MM）
+- `etime`: 结束时间（格式：MM-DD HH:MM，未结束显示 "-"）
 
 ### 查询特定项目
 
@@ -293,7 +309,18 @@ input_/absolute/path/to/input.sh
 process_/absolute/path/to/process.sh
 ```
 
-注意：使用 `-p` 参数时会自动显示表格和 shellPath 列表。
+**输出说明**：
+- 第一部分：任务状态表格
+  - `module`: 模块名称
+  - `pending`: 待处理任务数
+  - `running`: 运行中任务数
+  - `failed`: 失败任务数
+  - `finished`: 已完成任务数
+  - `stime`: 开始时间（格式：MM-DD HH:MM）
+  - `etime`: 结束时间（格式：MM-DD HH:MM，未结束显示 "-"）
+- 第二部分：shell 路径列表（空行分隔）
+  - 格式：`模块名_完整shell路径`
+  - 每个模块对应一行，用于快速定位任务文件
 
 ## 删除任务记录
 
@@ -336,8 +363,8 @@ starttime   DATETIME                           # 开始时间
 endtime     DATETIME                           # 结束时间
 mode        TEXT DEFAULT 'local'               # 运行模式（local/qsubsge）
 cpu         INTEGER DEFAULT 1                 # CPU数量（qsubsge模式）
-mem         INTEGER DEFAULT 1                 # 内存大小（GB，qsubsge模式，仅在用户显式设置时使用）
-h_vmem      INTEGER DEFAULT 1                 # 虚拟内存大小（GB，qsubsge模式，仅在用户显式设置时使用）
+mem         INTEGER DEFAULT 1                 # 虚拟内存（vf）大小（GB，qsubsge模式，映射到 -l vf=XG，仅在用户显式设置时使用）
+h_vmem      INTEGER DEFAULT 1                 # 硬虚拟内存限制（h_vmem）大小（GB，qsubsge模式，映射到 -l h_vmem=XG，仅在用户显式设置时使用）
 taskid      TEXT                               # 任务ID（local模式为PID，qsubsge模式为Job ID）
 ```
 
@@ -432,13 +459,4 @@ annotask在运行时会实时输出任务状态，采用表格格式显示。详
 例如示例所示`input.sh`中的第2个和第3个子脚本出错，那么待`input.sh`退出后，修正子脚本的命令行，再重新运行或者投递`input.sh`即可。在重新运行`work.sh`时，annotask会自动跳过已经成功完成的子脚本，只运行出错的子脚本。
 
 如果任务失败，annotask会自动重试（最多3次），无需手动重新运行。
-
-
-## QsubSge 模式报错: "current node is not in allowed nodes list"
-
-**原因**: 当前节点不在配置文件中的`node`列表中
-
-**解决方案**: 
-- 在配置文件的`node`列表中添加当前节点名称（支持多个节点，列表格式）
-- 或者将`node`设置为空列表（`node: []`）或不设置，以移除节点限制
 

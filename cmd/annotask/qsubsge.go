@@ -30,8 +30,8 @@ func runQsubSgeMode(config *Config, args []string) {
 	opt_p := parser.Int("p", "thread", &argparse.Options{Default: config.Defaults.Thread, Help: fmt.Sprintf("Max concurrent tasks to run (default: %d)", config.Defaults.Thread)})
 	opt_project := parser.String("", "project", &argparse.Options{Default: config.Project, Help: fmt.Sprintf("Project name (default: %s)", config.Project)})
 	opt_cpu := parser.Int("", "cpu", &argparse.Options{Default: config.Defaults.CPU, Help: fmt.Sprintf("Number of CPUs per task (default: %d)", config.Defaults.CPU)})
-	opt_mem := parser.Int("", "mem", &argparse.Options{Required: false, Help: "Memory in GB per task (only used if explicitly set)"})
-	opt_h_vmem := parser.Int("", "h_vmem", &argparse.Options{Required: false, Help: "Virtual memory in GB per task (default: mem * 1.25 if not set)"})
+	opt_mem := parser.Int("", "mem", &argparse.Options{Required: false, Help: "Virtual memory (vf) in GB per task (maps to -l vf=XG, only used if explicitly set)"})
+	opt_h_vmem := parser.Int("", "h_vmem", &argparse.Options{Required: false, Help: "Hard virtual memory limit (h_vmem) in GB per task (maps to -l h_vmem=XG, only used if explicitly set)"})
 	opt_queue := parser.String("", "queue", &argparse.Options{Default: config.Queue, Help: fmt.Sprintf("Queue name(s), comma-separated for multiple queues (default: %s)", config.Queue)})
 	// Format help message for sge-project
 	sgeProjectHelp := "SGE project name for resource quota management"
@@ -41,6 +41,7 @@ func runQsubSgeMode(config *Config, args []string) {
 		sgeProjectHelp = fmt.Sprintf("%s (default: from config, or empty if not set)", sgeProjectHelp)
 	}
 	opt_sge_project := parser.String("P", "sge-project", &argparse.Options{Default: config.SgeProject, Help: sgeProjectHelp})
+	opt_pesmp := parser.Flag("", "pesmp", &argparse.Options{Help: "Use -pe smp parallel environment mode instead of default -l p=X mode"})
 
 	// Check if user explicitly set --mem or --h_vmem before parsing
 	userSetMem := false
@@ -87,7 +88,13 @@ func runQsubSgeMode(config *Config, args []string) {
 		sgeProject = *opt_sge_project
 	}
 
-	runTasks(config, *opt_i, *opt_l, *opt_p, *opt_project, ModeQsubSge, *opt_cpu, mem, h_vmem, userSetMem, userSetHvmem, queue, sgeProject)
+	// Get pesmp flag value
+	usePesmp := false
+	if opt_pesmp != nil && *opt_pesmp {
+		usePesmp = true
+	}
+
+	runTasks(config, *opt_i, *opt_l, *opt_p, *opt_project, ModeQsubSge, *opt_cpu, mem, h_vmem, userSetMem, userSetHvmem, queue, sgeProject, usePesmp)
 	
 	// Close DRMAA session when qsubsge mode completes
 	closeDRMAASession()

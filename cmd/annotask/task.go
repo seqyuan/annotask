@@ -55,13 +55,13 @@ func closeDRMAASession() {
 	}
 }
 
-func IlterCommand(ctx context.Context, dbObj *MySql, thred int, need2run []int, mode JobMode, cpu, mem, h_vmem int, userSetMem, userSetHvmem bool, queue string, sgeProject string, write_pool *gpool.Pool) {
+func IlterCommand(ctx context.Context, dbObj *MySql, thred int, need2run []int, mode JobMode, cpu, mem, h_vmem int, userSetMem, userSetHvmem bool, queue string, sgeProject string, usePesmp bool, write_pool *gpool.Pool) {
 	pool := gpool.New(thred)
 
 	for _, N := range need2run {
 		pool.Add(1)
 		if mode == ModeQsubSge {
-			go SubmitQsubCommand(ctx, N, pool, dbObj, write_pool, cpu, mem, h_vmem, userSetMem, userSetHvmem, queue, sgeProject)
+			go SubmitQsubCommand(ctx, N, pool, dbObj, write_pool, cpu, mem, h_vmem, userSetMem, userSetHvmem, queue, sgeProject, usePesmp)
 		} else {
 			go RunCommand(N, pool, dbObj, write_pool)
 		}
@@ -152,7 +152,7 @@ func RunCommand(N int, pool *gpool.Pool, dbObj *MySql, write_pool *gpool.Pool) {
 	CheckErr(err)
 }
 
-func SubmitQsubCommand(ctx context.Context, N int, pool *gpool.Pool, dbObj *MySql, write_pool *gpool.Pool, cpu, mem, h_vmem int, userSetMem, userSetHvmem bool, queue string, sgeProject string) {
+func SubmitQsubCommand(ctx context.Context, N int, pool *gpool.Pool, dbObj *MySql, write_pool *gpool.Pool, cpu, mem, h_vmem int, userSetMem, userSetHvmem bool, queue string, sgeProject string, usePesmp bool) {
 	defer pool.Done()
 
 	var subShellPath string
@@ -245,21 +245,59 @@ func SubmitQsubCommand(ctx context.Context, N int, pool *gpool.Pool, dbObj *MySq
 	// - SGE automatically uses the script's directory as the working directory
 	// - Output files will be generated in the script's directory: {job_name}.o.{jobID} and {job_name}.e.{jobID}
 	// - Including -cwd in nativeSpec may cause parsing errors with some DRMAA implementations
-	nativeSpec := fmt.Sprintf("-l cpu=%d", cpu)
+	// Note: Following goqsub's pattern:
+	// - --mem maps to -l vf=XG (virtual free memory)
+	// - --h_vmem maps to -l h_vmem=XG (hard virtual memory limit)
+	// Two parallel environment modes:
+	// - Default mode (usePesmp=false): -l h_vmem=XG,p=Y (p=cpu)
+	// - PE SMP mode (usePesmp=true): -l h_vmem=XG -pe smp Y (Y=cpu)
+	
+	// Build resource specification
+	var resourceSpecs []string
+	
+	// Add memory specifications if set
 	if userSetMem {
-		nativeSpec += fmt.Sprintf(" -l mem=%dG", mem)
+		resourceSpecs = append(resourceSpecs, fmt.Sprintf("vf=%dG", mem))
 	}
 	if userSetHvmem {
-		nativeSpec += fmt.Sprintf(" -l h_vmem=%dG", h_vmem)
+		resourceSpecs = append(resourceSpecs, fmt.Sprintf("h_vmem=%dG", h_vmem))
 	}
+	
+	// Add CPU specification based on mode
+	if usePesmp {
+		// PE SMP mode: CPU will be specified via -pe smp
+		// Don't add p=cpu to -l specification
+	} else {
+		// Default mode: add p=cpu to -l specification
+		resourceSpecs = append(resourceSpecs, fmt.Sprintf("p=%d", cpu))
+	}
+	
+	// Build nativeSpec
+	var nativeSpecParts []string
+	if len(resourceSpecs) > 0 {
+		nativeSpecParts = append(nativeSpecParts, fmt.Sprintf("-l %s", strings.Join(resourceSpecs, ",")))
+	}
+	
+	// Add PE SMP specification if enabled
+	if usePesmp {
+		nativeSpecParts = append(nativeSpecParts, fmt.Sprintf("-pe smp %d", cpu))
+	}
+	
 	// Add queue specification if provided (supports multiple queues, comma-separated)
 	if queue != "" {
-		nativeSpec += fmt.Sprintf(" -q %s", queue)
+		// Trim any trailing commas or whitespace from queue string
+		queue = strings.TrimRight(strings.TrimSpace(queue), ", \t")
+		if queue != "" {
+			nativeSpecParts = append(nativeSpecParts, fmt.Sprintf("-q %s", queue))
+		}
 	}
+	
 	// Add SGE project specification if provided (for resource quota management)
 	if sgeProject != "" {
-		nativeSpec += fmt.Sprintf(" -P %s", sgeProject)
+		nativeSpecParts = append(nativeSpecParts, fmt.Sprintf("-P %s", sgeProject))
 	}
+	
+	nativeSpec := strings.Join(nativeSpecParts, " ")
 	jt.SetNativeSpecification(nativeSpec)
 	
 	// Debug: log nativeSpec for troubleshooting
