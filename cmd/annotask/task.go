@@ -231,46 +231,30 @@ func SubmitQsubCommand(ctx context.Context, N int, pool *gpool.Pool, dbObj *MySq
 	subShellBase := filepath.Base(subShellPath)
 	subShellBaseNoExt := strings.TrimSuffix(subShellBase, filepath.Ext(subShellBase))
 
-	// Set working directory to script's directory
-	// This ensures output files are generated in the script's directory, not in home directory
-	if err := jt.SetWD(subShellDir); err != nil {
-		log.Printf("Warning: Could not set working directory: %v", err)
-	}
-
 	// Set job template properties
+	// Use absolute script path to ensure SGE can find the script
+	// Following goqsub's approach: don't set output paths explicitly, let SGE auto-generate them
 	jt.SetRemoteCommand(subShellPath)
 	// Set job name to file prefix (without .sh extension)
-	// SGE will generate output files as: {job_name}.o.{jobID} and {job_name}.e.{jobID}
+	// SGE will auto-generate output files as: {job_name}.o.{jobID} and {job_name}.e.{jobID}
+	// For example: task_0001.o.8944790 and task_0001.e.8944790
+	// Output files will be generated in the script's directory (via -cwd in nativeSpec)
 	jt.SetJobName(subShellBaseNoExt)
+	// Note: We don't call SetOutputPath/SetErrorPath - let SGE auto-generate based on job name
+	// This matches goqsub's implementation and avoids DRMAA path format issues
 
-	// Set output and error file paths explicitly
-	// Path format: {script_dir}/{job_name}.o and {script_dir}/{job_name}.e
-	// SGE will automatically append jobID to the filenames
-	// The exact format depends on SGE version:
-	// - Some versions: {job_name}.o.{jobID} and {job_name}.e.{jobID}
-	// - Other versions: {job_name}.o{jobID} and {job_name}.e{jobID}
-	// We handle both formats when reading the files
-	outputPath := filepath.Join(subShellDir, fmt.Sprintf("%s.o", subShellBaseNoExt))
-	errorPath := filepath.Join(subShellDir, fmt.Sprintf("%s.e", subShellBaseNoExt))
-	if err := jt.SetOutputPath(outputPath); err != nil {
-		log.Printf("Warning: Could not set output path: %v", err)
-	}
-	if err := jt.SetErrorPath(errorPath); err != nil {
-		log.Printf("Warning: Could not set error path: %v", err)
-	}
-
-	// Build nativeSpec with only SGE resource options
-	// Do NOT include -cwd or script path in nativeSpec
-	// - SetRemoteCommand already sets the script path, which SGE uses to determine working directory
-	// - SGE automatically uses the script's directory as the working directory
-	// - Output files will be generated in the script's directory: {job_name}.o.{jobID} and {job_name}.e.{jobID}
-	// - Including -cwd in nativeSpec may cause parsing errors with some DRMAA implementations
+	// Build nativeSpec with SGE resource options
+	// Following goqsub's pattern: include -cwd to ensure output files are generated in script's directory
+	// - SetRemoteCommand sets the script path
+	// - -cwd ensures working directory is script's directory
+	// - -b n means non-binary mode (use shell)
+	// - SGE will auto-generate output files as {job_name}.o.{jobID} and {job_name}.e.{jobID}
 	// Note: Following goqsub's pattern:
 	// - --mem maps to -l vf=XG (virtual free memory)
 	// - --h_vmem maps to -l h_vmem=XG (hard virtual memory limit)
 	// Two parallel environment modes:
-	// - pe_smp mode (default): -l h_vmem=XG -pe smp Y (Y=cpu)
-	// - num_proc mode: -l h_vmem=XG,p=Y (p=cpu)
+	// - pe_smp mode (default): -pe smp Y -cwd -b n (Y=cpu)
+	// - num_proc mode: -l p=Y -cwd -b n (p=cpu)
 	
 	// Build resource specification
 	var resourceSpecs []string
@@ -283,22 +267,24 @@ func SubmitQsubCommand(ctx context.Context, N int, pool *gpool.Pool, dbObj *MySq
 		resourceSpecs = append(resourceSpecs, fmt.Sprintf("h_vmem=%dG", h_vmem))
 	}
 	
-	// Add CPU specification based on parallel environment mode
-	if parallelEnvMode == "num_proc" {
+	// Build nativeSpec
+	var nativeSpecParts []string
+	
+	// Add parallel environment or CPU specification based on mode
+	if parallelEnvMode == string(ParallelEnvPeSmp) {
+		// pe_smp mode: use -pe smp (default, matches goqsub)
+		nativeSpecParts = append(nativeSpecParts, fmt.Sprintf("-pe smp %d", cpu))
+	} else {
 		// num_proc mode: add p=cpu to -l specification
 		resourceSpecs = append(resourceSpecs, fmt.Sprintf("p=%d", cpu))
 	}
-	// pe_smp mode: CPU will be specified via -pe smp (handled below)
 	
-	// Build nativeSpec
-	var nativeSpecParts []string
+	// Add -cwd and -b n (non-binary mode, use shell) to match goqsub
+	nativeSpecParts = append(nativeSpecParts, "-cwd", "-b n")
+	
+	// Add resource specifications if any
 	if len(resourceSpecs) > 0 {
 		nativeSpecParts = append(nativeSpecParts, fmt.Sprintf("-l %s", strings.Join(resourceSpecs, ",")))
-	}
-	
-	// Add PE SMP specification if pe_smp mode
-	if parallelEnvMode == "pe_smp" {
-		nativeSpecParts = append(nativeSpecParts, fmt.Sprintf("-pe smp %d", cpu))
 	}
 	
 	// Add queue specification if provided (supports multiple queues, comma-separated)
