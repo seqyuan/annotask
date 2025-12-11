@@ -77,7 +77,7 @@ export CGO_LDFLAGS="-L/opt/gridengine/lib/lx-amd64 -ldrmaa -Wl,-rpath,/opt/gride
 export LD_LIBRARY_PATH=/opt/gridengine/lib/lx-amd64:$LD_LIBRARY_PATH
 
 # 安装（从 GitHub 下载并编译指定版本）
-CGO_ENABLED=1 go install github.com/seqyuan/annotask/cmd/annotask@v1.8.2
+CGO_ENABLED=1 go install github.com/seqyuan/annotask/cmd/annotask@v1.8.3
 ```
 
 ```bash
@@ -237,8 +237,8 @@ All works: 5
 Successed: 3
 Error: 2
 Err Shells:
-2	/Volumes/RD/parrell_task/input.sh.shell/work_0002.sh
-3	/Volumes/RD/parrell_task/input.sh.shell/work_0003.sh
+2	/Volumes/RD/parrell_task/input.sh.shell/task_0002.sh
+3	/Volumes/RD/parrell_task/input.sh.shell/task_0003.sh
 ```
 
 运行产生的目录结构：
@@ -247,24 +247,24 @@ Err Shells:
 ├── input.sh
 ├── input.sh.db
 └── input.sh.shell
-    ├── work_0001.sh
-    ├── work_0001.sh.e
-    ├── work_0001.sh.o
-    ├── work_0001.sh.sign
-    ├── work_0002.sh
-    ├── work_0002.sh.e
-    ├── work_0002.sh.o
-    ├── work_0003.sh
-    ├── work_0003.sh.e
-    ├── work_0003.sh.o
-    ├── work_0004.sh
-    ├── work_0004.sh.e
-    ├── work_0004.sh.o
-    ├── work_0004.sh.sign
-    ├── work_0005.sh
-    ├── work_0005.sh.e
-    ├── work_0005.sh.o
-    └── work_0005.sh.sign
+    ├── task_0001.sh
+    ├── task_0001.sh.e
+    ├── task_0001.sh.o
+    ├── task_0001.sh.sign
+    ├── task_0002.sh
+    ├── task_0002.sh.e
+    ├── task_0002.sh.o
+    ├── task_0003.sh
+    ├── task_0003.sh.e
+    ├── task_0003.sh.o
+    ├── task_0004.sh
+    ├── task_0004.sh.e
+    ├── task_0004.sh.o
+    ├── task_0004.sh.sign
+    ├── task_0005.sh
+    ├── task_0005.sh.e
+    ├── task_0005.sh.o
+    └── task_0005.sh.sign
 ```
 
 ## qsubsge 模式
@@ -337,10 +337,10 @@ annotask qsubsge -i input.sh --cpu 4 --h_vmem 18 --mode num_proc
 - 如果 `node` 为空或不设置，则不对节点做限制
 - 如果当前节点不在允许的列表中，程序会报错退出
 - 任务会自动投递到 SGE 集群，输出文件会生成在子脚本所在目录（`{输入文件路径}.shell`）
-- 输出文件格式为 `{文件前缀}_0001.o.{jobID}` 和 `{文件前缀}_0001.e.{jobID}`
-- 例如：输入文件为 `input.sh`，子任务为 `input_0001.sh`，则输出文件为：
-  - `input.sh.shell/input_0001.o.{jobID}`（标准输出）
-  - `input.sh.shell/input_0001.e.{jobID}`（标准错误）
+- 输出文件格式为 `task_0001.o.{jobID}` 和 `task_0001.e.{jobID}`
+- 例如：输入文件为 `input.sh`，子任务为 `task_0001.sh`，则输出文件为：
+  - `input.sh.shell/task_0001.o.{jobID}`（标准输出）
+  - `input.sh.shell/task_0001.e.{jobID}`（标准错误）
 
 ## 输入文件格式
 
@@ -370,7 +370,7 @@ python3 /seqyuan/bin/blast_xml2txt.py -i sample4_1.xml -o sample4_1.txt
 1. `input.sh.db`文件，此文件为sqlite数据库（本地任务数据库）
 2. `input.sh.shell`目录，子脚本存放目录
 3. 按照`-l`参数切割的input.sh的子脚本，存放在`input.sh.shell`目录
-4. 子脚本命名格式：`{文件前缀}_0001.sh`（例如 `input.sh` 会生成 `input_0001.sh`，最多支持9999个子任务）
+4. 子脚本命名格式：`task_0001.sh`（固定使用 `task` 作为前缀，最多支持9999个子任务）
 5. 每个子脚本的标准输出和标准错误会分别保存到 `.o` 和 `.e` 文件
 
 ## 任务状态查询

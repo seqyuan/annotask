@@ -59,8 +59,9 @@ func Creat_tb(shell_path string, line_unit int, mode JobMode) (dbObj *MySql) {
 	// Update mode for unfinished jobs
 	dbObj.UpdateModeForUnfinished(mode)
 
-	// Get file prefix for naming
-	filePrefix := getFilePrefix(shellAbsName)
+	// Use fixed prefix "task" for sub-shell script naming
+	// This ensures consistent naming regardless of input script name
+	filePrefix := "task"
 
 	tx, _ := dbObj.Db.Begin()
 	defer tx.Rollback()
