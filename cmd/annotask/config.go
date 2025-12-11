@@ -11,7 +11,8 @@ import (
 )
 
 // LoadConfig loads configuration from user home directory and executable directory
-// User home config (~/.annotask.yml) takes precedence over executable directory config
+// User home config (~/.annotask/annotask.yaml) takes precedence over executable directory config
+// If user config's db path doesn't exist, fall back to system config's db path
 func LoadConfig() (*Config, error) {
 	// Get executable directory
 	exePath, err := os.Executable()
@@ -26,11 +27,16 @@ func LoadConfig() (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to get current user: %v", err)
 	}
-	userConfigPath := filepath.Join(usr.HomeDir, ".annotask.yml")
+	userConfigDir := filepath.Join(usr.HomeDir, ".annotask")
+	userConfigPath := filepath.Join(userConfigDir, "annotask.yaml")
+	
+	// Default database path: use user home directory to avoid permission issues
+	// If executable is in system directory (e.g., /usr/bin), user may not have write permission
+	defaultDbPath := filepath.Join(usr.HomeDir, ".annotask", "annotask.db")
 
 	// Initialize with defaults
 	config := &Config{
-		Db:      filepath.Join(exeDir, "annotask.db"),
+		Db:      defaultDbPath,
 		Project: "default",
 	}
 	config.Retry.Max = 3
@@ -44,6 +50,7 @@ func LoadConfig() (*Config, error) {
 
 	// First, load from executable directory config (if exists)
 	// If it doesn't exist, create a default one
+	var systemDbPath string
 	if _, err := os.Stat(exeConfigPath); err == nil {
 		// Config file exists, load it
 		data, err := os.ReadFile(exeConfigPath)
@@ -54,13 +61,18 @@ func LoadConfig() (*Config, error) {
 		if err := yaml.Unmarshal(data, &exeConfig); err != nil {
 			return nil, fmt.Errorf("failed to parse executable config file: %v", err)
 		}
+		// Save system db path before merging
+		if exeConfig.Db != "" {
+			systemDbPath = exeConfig.Db
+		}
 		// Merge executable config (only non-empty values)
 		mergeConfig(config, &exeConfig)
 	} else {
 		// Config file doesn't exist, create a default one
 		// Create a default config for executable directory
+		// Note: Db path should use user home directory to avoid permission issues
 		defaultExeConfig := &Config{
-			Db:      filepath.Join(exeDir, "annotask.db"),
+			Db:      defaultDbPath,
 			Project: "default",
 		}
 		defaultExeConfig.Retry.Max = 3
@@ -82,9 +94,11 @@ func LoadConfig() (*Config, error) {
 				log.Printf("Created default config file: %s", exeConfigPath)
 			}
 		}
+		systemDbPath = defaultDbPath
 	}
 
 	// Then, load from user home config (if exists) - this takes precedence
+	var userDbPath string
 	if _, err := os.Stat(userConfigPath); err == nil {
 		data, err := os.ReadFile(userConfigPath)
 		if err != nil {
@@ -94,8 +108,45 @@ func LoadConfig() (*Config, error) {
 		if err := yaml.Unmarshal(data, &userConfig); err != nil {
 			return nil, fmt.Errorf("failed to parse user config file: %v", err)
 		}
+		// Save user db path before merging
+		if userConfig.Db != "" {
+			userDbPath = userConfig.Db
+		}
 		// Merge user config (takes precedence)
 		mergeConfig(config, &userConfig)
+	}
+
+	// Check if user config's db path exists, if not, fall back to system db path
+	if userDbPath != "" {
+		// Check if user db path exists (file or directory exists)
+		if _, err := os.Stat(userDbPath); err == nil {
+			// User db path exists, use it
+			config.Db = userDbPath
+		} else {
+			// User db path doesn't exist, check if system db path exists
+			if systemDbPath != "" {
+				if _, err := os.Stat(systemDbPath); err == nil {
+					// System db path exists, use it
+					config.Db = systemDbPath
+					log.Printf("User db path (%s) doesn't exist, using system db path: %s", userDbPath, systemDbPath)
+				} else {
+					// Neither exists, use user db path (will be created)
+					config.Db = userDbPath
+				}
+			} else {
+				// No system db path, use user db path (will be created)
+				config.Db = userDbPath
+			}
+		}
+	} else if systemDbPath != "" {
+		// No user db path configured, check if system db path exists
+		if _, err := os.Stat(systemDbPath); err == nil {
+			// System db path exists, use it
+			config.Db = systemDbPath
+		} else {
+			// System db path doesn't exist, use default user db path (will be created)
+			config.Db = defaultDbPath
+		}
 	}
 
 	// If node is empty or nil, initialize as empty slice
@@ -137,7 +188,10 @@ func mergeConfig(target, source *Config) {
 	if source.MonitorUpdateInterval > 0 {
 		target.MonitorUpdateInterval = source.MonitorUpdateInterval
 	}
-	// Db is always from executable directory, don't merge
+	// Db will be handled separately in LoadConfig with existence check
+	if source.Db != "" {
+		target.Db = source.Db
+	}
 }
 
 // EnsureUserConfig creates user home config file if it doesn't exist
@@ -146,7 +200,8 @@ func EnsureUserConfig() error {
 	if err != nil {
 		return fmt.Errorf("failed to get current user: %v", err)
 	}
-	userConfigPath := filepath.Join(usr.HomeDir, ".annotask.yml")
+	userConfigDir := filepath.Join(usr.HomeDir, ".annotask")
+	userConfigPath := filepath.Join(userConfigDir, "annotask.yaml")
 
 	// Check if file exists
 	if _, err := os.Stat(userConfigPath); err == nil {
@@ -154,9 +209,16 @@ func EnsureUserConfig() error {
 		return nil
 	}
 
-	// Create default user config with only essential fields
-	// User config should only contain: retry.max, queue, sge_project
+	// Create .annotask directory if it doesn't exist
+	if err := os.MkdirAll(userConfigDir, 0755); err != nil {
+		return fmt.Errorf("failed to create user config directory: %v", err)
+	}
+
+	// Create default user config with essential fields
+	// User config should contain: db, retry.max, queue, sge_project
+	defaultDbPath := filepath.Join(usr.HomeDir, ".annotask", "annotask.db")
 	type UserConfigStruct struct {
+		Db         string `yaml:"db"`
 		Retry      struct {
 			Max int `yaml:"max"`
 		} `yaml:"retry"`
@@ -165,6 +227,7 @@ func EnsureUserConfig() error {
 	}
 	
 	userConfig := UserConfigStruct{}
+	userConfig.Db = defaultDbPath
 	userConfig.Retry.Max = 3
 	userConfig.Queue = "sci.q"
 	userConfig.SgeProject = ""

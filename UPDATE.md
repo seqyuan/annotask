@@ -10,12 +10,16 @@
 
 #### 用户配置文件支持
 - **两级配置系统**：支持用户级和系统级配置文件
-  - 用户配置文件：`~/.annotask.yml`（用户 home 目录）
+  - 用户配置文件：`~/.annotask/annotask.yaml`（用户 home 目录下的 `.annotask` 目录）
   - 系统配置文件：程序目录下的 `annotask.yaml`
   - 配置优先级：命令行参数 > 用户配置 > 系统配置 > 程序默认值
 - **自动创建用户配置**：
-  - 首次空运行 `annotask` 时，自动在用户 home 目录创建 `.annotask.yml`
-  - 默认内容：`project: default`, `retry.max: 3`, `queue: sci.q`
+  - 首次空运行 `annotask` 时，自动在用户 home 目录下的 `.annotask` 目录创建 `annotask.yaml`
+  - 默认内容：`db: ~/.annotask/annotask.db`, `retry.max: 3`, `queue: sci.q`, `sge_project: ""`
+- **数据库路径智能回退**：
+  - 如果用户配置的 db 路径不存在，自动回退到系统配置的 db 路径
+  - 如果系统配置的 db 路径也不存在，使用用户配置的 db 路径（会自动创建）
+  - 确保数据库文件始终可以正常创建和使用
 - **智能配置合并**：
   - 用户配置优先于系统配置
   - 命令行参数优先于所有配置文件

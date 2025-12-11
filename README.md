@@ -56,7 +56,7 @@
 ### 🎯 项目管理
 - **项目组织**：支持通过项目名称组织和管理任务
 - **两级配置管理**：支持用户级和系统级配置文件
-  - 用户配置文件（`~/.annotask.yml`）：用户个人默认设置，优先级高
+  - 用户配置文件（`~/.annotask/annotask.yaml`）：用户个人默认设置，优先级高
   - 系统配置文件（程序目录下的 `annotask.yaml`）：系统级默认设置
   - 首次空运行 `annotask` 时自动创建用户配置文件
   - 配置优先级：命令行参数 > 用户配置 > 系统配置 > 程序默认值
@@ -77,7 +77,7 @@ export CGO_LDFLAGS="-L/opt/gridengine/lib/lx-amd64 -ldrmaa -Wl,-rpath,/opt/gride
 export LD_LIBRARY_PATH=/opt/gridengine/lib/lx-amd64:$LD_LIBRARY_PATH
 
 # 安装（从 GitHub 下载并编译指定版本）
-CGO_ENABLED=1 go install github.com/seqyuan/annotask/cmd/annotask@v1.8.5
+CGO_ENABLED=1 go install github.com/seqyuan/annotask/cmd/annotask@v1.8.6
 ```
 
 ```bash
@@ -89,7 +89,7 @@ which annotask
 
 ### 配置文件位置和优先级
 
-1. **用户配置文件**：`~/.annotask.yml`（用户 home 目录）
+1. **用户配置文件**：`~/.annotask/annotask.yaml`（用户 home 目录下的 `.annotask` 目录）
    - 优先级：高（仅次于命令行参数）
    - 首次空运行 `annotask` 时自动创建
    - 适用于个人默认设置（如默认队列、重试次数等）
@@ -101,26 +101,34 @@ which annotask
 
 3. **配置优先级**（从高到低）：
    - 命令行参数（`--queue`, `-P/--sge-project` 等）
-   - 用户配置文件（`~/.annotask.yml`）
+   - 用户配置文件（`~/.annotask/annotask.yaml`）
    - 系统配置文件（`annotask.yaml`）
    - 程序默认值
 
-### 用户配置文件（~/.annotask.yml）
+### 用户配置文件（~/.annotask/annotask.yaml）
 
-首次空运行 `annotask` 时，会在用户 home 目录自动创建 `.annotask.yml` 文件，默认内容：
+首次空运行 `annotask` 时，会在用户 home 目录下的 `.annotask` 目录自动创建 `annotask.yaml` 文件，默认内容：
 
 ```yaml
-project: default
+db: ~/.annotask/annotask.db
 retry:
   max: 3
 queue: sci.q
-sge_project: 
+sge_project: ""
 ```
+
+**配置说明**：
+- `db`: 全局数据库路径，默认为 `~/.annotask/annotask.db`
+  - 如果配置的 db 路径不存在，程序会自动回退到系统配置的 db 路径
+  - 如果系统配置的 db 路径也不存在，则使用用户配置的 db 路径（会自动创建）
+- `retry.max`: 最大重试次数，默认为 3
+- `queue`: SGE 默认队列，默认为 `sci.q`
+- `sge_project`: SGE 项目名称，默认为空
 
 **使用场景**：
 - 设置个人默认队列（如 `queue: sci.q`）
 - 设置个人默认重试次数（如 `retry.max: 5`）
-- 设置个人默认项目名称（如 `project: myproject`）
+- 设置个人数据库路径（如 `db: /path/to/custom/annotask.db`）
 
 **示例**：
 ```bash
@@ -128,10 +136,10 @@ sge_project:
 annotask
 
 # 编辑用户配置文件
-vim ~/.annotask.yml
+vim ~/.annotask/annotask.yaml
 
 # 之后运行 qsubsge 时，如果没有指定 --queue，会自动使用用户配置中的 queue
-annotask qsubsge -i input.sh  # 使用 ~/.annotask.yml 中的 queue: sci.q
+annotask qsubsge -i input.sh  # 使用 ~/.annotask/annotask.yaml 中的 queue: sci.q
 annotask qsubsge -i input.sh --queue trans.q  # 命令行参数优先，使用 trans.q
 ```
 
