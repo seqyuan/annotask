@@ -154,10 +154,17 @@ func EnsureUserConfig() error {
 		return nil
 	}
 
-	// Create default user config
-	userConfig := &Config{
-		Project: "default",
+	// Create default user config with only essential fields
+	// User config should only contain: retry.max, queue, sge_project
+	type UserConfigStruct struct {
+		Retry      struct {
+			Max int `yaml:"max"`
+		} `yaml:"retry"`
+		Queue      string `yaml:"queue"`
+		SgeProject string `yaml:"sge_project"`
 	}
+	
+	userConfig := UserConfigStruct{}
 	userConfig.Retry.Max = 3
 	userConfig.Queue = "sci.q"
 	userConfig.SgeProject = ""
