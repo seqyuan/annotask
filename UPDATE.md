@@ -4,6 +4,49 @@
 
 ---
 
+## v1.8.1 (2025-12)
+
+### 🎯 重大改进
+
+#### 用户配置文件支持
+- **两级配置系统**：支持用户级和系统级配置文件
+  - 用户配置文件：`~/.annotask.yml`（用户 home 目录）
+  - 系统配置文件：程序目录下的 `annotask.yaml`
+  - 配置优先级：命令行参数 > 用户配置 > 系统配置 > 程序默认值
+- **自动创建用户配置**：
+  - 首次空运行 `annotask` 时，自动在用户 home 目录创建 `.annotask.yml`
+  - 默认内容：`project: default`, `retry.max: 3`, `queue: sci.q`
+- **智能配置合并**：
+  - 用户配置优先于系统配置
+  - 命令行参数优先于所有配置文件
+  - 投递时自动使用用户配置中的 `queue` 和 `retry.max`（如果命令行未指定）
+
+#### 并行环境模式改进
+- **`--mode` 参数替代 `--pesmp`**：
+  - 移除 `--pesmp` 标志参数
+  - 新增 `--mode` 字符串参数，支持 `pe_smp`（默认）和 `num_proc`
+  - 默认模式改为 `pe_smp`（使用 `-pe smp X`）
+  - `num_proc` 模式使用 `-l p=X`
+
+### 📝 详细变更
+
+1. **代码修改**
+   - `config.go`: 添加 `LoadConfig()` 支持两级配置加载和合并
+   - `config.go`: 添加 `EnsureUserConfig()` 函数，自动创建用户配置文件
+   - `config.go`: 添加 `mergeConfig()` 函数，实现配置合并逻辑
+   - `main.go`: 空运行时自动创建用户配置文件
+   - `qsubsge.go`: 移除 `--pesmp`，添加 `--mode` 参数
+   - `qsubsge.go`: 优化参数获取逻辑，优先使用用户配置
+   - `task.go`: 更新并行环境模式判断逻辑，使用 `parallelEnvMode` 字符串
+   - `types.go`: 添加 `ParallelEnvMode` 类型定义
+
+2. **文档更新**
+   - 更新 `README.md` 中的配置文件说明，添加用户配置文件章节
+   - 更新所有参数说明，明确配置优先级
+   - 更新 `ARCHITECTURE.md` 中的并行环境模式说明
+
+---
+
 ## v1.7.8 (2025-12)
 
 ### 🎯 重大改进

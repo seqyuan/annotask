@@ -11,19 +11,62 @@
 ---
 
 # 程序功能
-> 程序适用于有很多运行时间短，但是需要运行很多的脚本，有助于减少投递的脚本。
-> 例如有1000个cat 命令需要执行，这些命令间没有依赖关系，每个cat命令运行在2min左右
 
-1. 支持本地并行执行和 SGE 集群投递两种模式
-2. 并行的线程数可指定
-3. 如果并行执行的其中某些子进程错误退出，再次执行此程序的命令可跳过成功完成的项只执行失败的子进程
-4. 所有并行执行的子进程相互独立，互不影响
-5. 如果并行执行的任意一个子进程退出码非0，最终annotask 也是非0退出
-6. annotask会统计成功运行子脚本数量以及运行失败子脚本数量输出到stdout，如果有运行失败的脚本会输出到annotask的stderr
-7. 支持自动重试机制，失败任务最多重试3次（可配置）
-8. 支持内存自适应重试：如果任务因内存不足被kill，下次重试时自动增加125%的内存
-9. 实时监控任务状态，输出到标准输出
-10. 支持项目管理和任务状态查询
+`annotask` 是一个高效的并行任务执行工具，专为处理大量独立、需要并行运行的脚本任务而设计。通过智能的任务分组、并发控制和状态管理，显著减少任务投递开销，提高执行效率。
+
+## 核心特性
+
+### 🚀 双模式执行
+- **本地并行模式（local）**：在本地机器上并行执行任务，适合单机多核环境
+- **SGE 集群模式（qsubsge）**：通过 DRMAA 接口将任务投递到 SGE 集群执行，支持大规模分布式计算
+  - 支持两种并行环境模式：默认模式（`-l p=X`）和 PE SMP 模式（`-pe smp X`）
+  - 灵活的资源管理：可指定 CPU、内存（vf/h_vmem）、队列、SGE 项目等参数
+  - 节点安全检查：防止在计算节点误投递任务
+
+### 📦 智能任务管理
+- **任务分组**：支持将输入文件按行分组（`-l` 参数），将多个命令合并为一个任务单元执行
+- **断点续传**：基于 SQLite 数据库记录任务状态，支持中断后继续执行
+  - 已成功完成的任务会被自动跳过，只执行失败或未执行的任务
+  - 每个任务独立执行，互不影响，失败任务不会阻塞其他任务
+- **并发控制**：可指定最大并发任务数（`-p` 参数），灵活控制资源使用
+
+### 🔄 自动重试机制
+- **智能重试**：失败任务最多自动重试 3 次（可在配置文件中自定义）
+- **内存自适应重试**：在 qsubsge 模式下，如果任务因内存不足被 SGE kill
+  - 自动检测内存相关错误（OOM、h_vmem 超限等）
+  - 下次重试时自动将用户显式设置的内存参数增加 125%（向上取整）
+  - 仅针对用户显式设置的内存参数（`--mem` 或 `--h_vmem`）进行自适应调整
+
+### 📊 实时监控与状态跟踪
+- **实时状态输出**：以表格形式实时输出任务状态变化到标准输出
+  - 显示字段：重试轮次、任务编号、状态、任务ID、退出码、时间
+  - 每秒更新一次，及时反馈任务执行情况
+- **全局任务数据库**：记录所有项目的任务执行历史
+  - 支持按项目查询任务状态（`stat` 模块）
+  - 支持删除任务记录（`delete` 模块）
+  - 便于任务管理和历史追溯
+
+### 📝 完善的日志与输出
+- **独立日志文件**：每个任务的 stdout 和 stderr 输出到独立文件（`.o` 和 `.e` 文件）
+- **执行统计**：程序结束时统计成功和失败的任务数量
+  - 成功和失败数量输出到标准输出
+  - 失败任务的路径输出到标准错误
+  - 如果有任何任务失败，程序退出码为非 0
+
+### 🎯 项目管理
+- **项目组织**：支持通过项目名称组织和管理任务
+- **两级配置管理**：支持用户级和系统级配置文件
+  - 用户配置文件（`~/.annotask.yml`）：用户个人默认设置，优先级高
+  - 系统配置文件（程序目录下的 `annotask.yaml`）：系统级默认设置
+  - 首次空运行 `annotask` 时自动创建用户配置文件
+  - 配置优先级：命令行参数 > 用户配置 > 系统配置 > 程序默认值
+
+## 适用场景
+
+- **批量数据处理**：大量独立的任务，如批量文件处理、数据转换等
+- **生物信息学分析**：大量样本的独立分析任务，如序列比对、注释等
+- **并行计算任务**：需要并发执行但相互独立的计算任务
+- **集群作业管理**：需要将大量小任务投递到 SGE 集群的场景
 
 # 安装
 ### 安装命令
@@ -34,7 +77,7 @@ export CGO_LDFLAGS="-L/opt/gridengine/lib/lx-amd64 -ldrmaa -Wl,-rpath,/opt/gride
 export LD_LIBRARY_PATH=/opt/gridengine/lib/lx-amd64:$LD_LIBRARY_PATH
 
 # 安装（从 GitHub 下载并编译指定版本）
-CGO_ENABLED=1 go install github.com/seqyuan/annotask/cmd/annotask@v1.8.0
+CGO_ENABLED=1 go install github.com/seqyuan/annotask/cmd/annotask@v1.8.2
 ```
 
 ```bash
@@ -42,16 +85,73 @@ which annotask
 ```
 ## 配置文件
 
-首次运行 `annotask` 时，会在程序所在目录自动创建 `annotask.yaml` 配置文件。配置文件包含：
+`annotask` 支持两级配置文件系统，提供灵活的配置管理：
+
+### 配置文件位置和优先级
+
+1. **用户配置文件**：`~/.annotask.yml`（用户 home 目录）
+   - 优先级：高（仅次于命令行参数）
+   - 首次空运行 `annotask` 时自动创建
+   - 适用于个人默认设置（如默认队列、重试次数等）
+
+2. **系统配置文件**：程序所在目录的 `annotask.yaml`
+   - 优先级：中（低于用户配置）
+   - 首次运行 `annotask` 时自动创建
+   - 适用于系统级默认设置
+
+3. **配置优先级**（从高到低）：
+   - 命令行参数（`--queue`, `-P/--sge-project` 等）
+   - 用户配置文件（`~/.annotask.yml`）
+   - 系统配置文件（`annotask.yaml`）
+   - 程序默认值
+
+### 用户配置文件（~/.annotask.yml）
+
+首次空运行 `annotask` 时，会在用户 home 目录自动创建 `.annotask.yml` 文件，默认内容：
+
+```yaml
+project: default
+retry:
+  max: 3
+queue: sci.q
+sge_project: 
+```
+
+**使用场景**：
+- 设置个人默认队列（如 `queue: sci.q`）
+- 设置个人默认重试次数（如 `retry.max: 5`）
+- 设置个人默认项目名称（如 `project: myproject`）
+
+**示例**：
+```bash
+# 空运行 annotask，自动创建用户配置文件
+annotask
+
+# 编辑用户配置文件
+vim ~/.annotask.yml
+
+# 之后运行 qsubsge 时，如果没有指定 --queue，会自动使用用户配置中的 queue
+annotask qsubsge -i input.sh  # 使用 ~/.annotask.yml 中的 queue: sci.q
+annotask qsubsge -i input.sh --queue trans.q  # 命令行参数优先，使用 trans.q
+```
+
+### 系统配置文件（annotask.yaml）
+
+系统配置文件包含完整的配置选项：
 
 - `db`: 全局数据库路径（记录所有任务）
 - `project`: 默认项目名称
 - `retry.max`: 最大重试次数
 - `queue`: SGE 默认队列
+- `sge_project`: SGE 项目名称（用于资源配额管理）
 - `node`: 允许使用 qsubsge 模式的节点列表（列表格式，支持多个节点）
   - 如果为空或不设置，则不对 qsubsge 模式做节点限制
   - 如果设置了节点列表，当前节点必须在列表中才能使用 qsubsge 模式
 - `defaults`: 各参数的默认值
+  - `line`: 默认行分组数
+  - `thread`: 默认并发线程数
+  - `cpu`: 默认 CPU 数量
+- `monitor_update_interval`: 全局数据库更新间隔（秒，默认 60）
 
 配置文件示例见 `annotask.yaml.example`。
 
@@ -122,7 +222,7 @@ annotask -i input.sh -l 2 -p 4 --project myproject
 -i, --infile    输入文件，shell脚本（必需）
 -l, --line      每几行作为一个任务单元（默认：1）
 -p, --thread    最大并发任务数（默认：1）
-    --project   项目名称（默认：从配置文件读取）
+    --project   项目名称（默认：从用户配置或系统配置读取）
 ```
 
 ### 使用示例
@@ -188,23 +288,28 @@ annotask qsubsge -i input.sh --queue trans.q,nassci.q,sci.q
 # 指定 SGE 项目（用于资源配额管理）
 annotask qsubsge -i input.sh -P bioinformatics
 
-# 使用 -pe smp 并行环境模式（默认使用 -l p=X 模式）
-annotask qsubsge -i input.sh --cpu 4 --h_vmem 5 --pesmp
+# 使用 -pe smp 并行环境模式（默认）
+annotask qsubsge -i input.sh --cpu 4 --h_vmem 5
+# 或显式指定
+annotask qsubsge -i input.sh --cpu 4 --h_vmem 5 --mode pe_smp
+
+# 使用 -l p=X 模式
+annotask qsubsge -i input.sh --cpu 4 --h_vmem 18 --mode num_proc
 ```
 
 ### 参数说明
 
 ```
 -i, --infile    输入文件，shell脚本格式（必需）
--l, --line      每几行作为一个任务单元（默认：从配置文件读取）
--p, --thread    最大并发任务数（默认：从配置文件读取）
-    --project   项目名称（默认：从配置文件读取）
-    --cpu       CPU数量（默认：从配置文件读取）
+-l, --line      每几行作为一个任务单元（默认：从用户配置或系统配置读取）
+-p, --thread    最大并发任务数（默认：从用户配置或系统配置读取）
+    --project   项目名称（默认：从用户配置或系统配置读取）
+    --cpu       CPU数量（默认：从用户配置或系统配置读取）
     --mem       虚拟内存（vf）大小（GB，映射到 -l vf=XG，仅在显式设置时在DRMAA中使用）
     --h_vmem    硬虚拟内存限制（h_vmem）大小（GB，映射到 -l h_vmem=XG，仅在显式设置时在DRMAA中使用）
-    --queue     队列名称（多个队列用逗号分隔，默认：从配置文件读取）
-    -P, --sge-project  SGE项目名称（用于资源配额管理，默认：从配置文件读取）
-    --pesmp     使用 -pe smp 并行环境模式（默认：使用 -l p=X 模式）
+    --queue     队列名称（多个队列用逗号分隔，默认：从用户配置或系统配置读取）
+    -P, --sge-project  SGE项目名称（用于资源配额管理，默认：从用户配置或系统配置读取）
+    --mode      并行环境模式：pe_smp（使用 -pe smp X，默认）或 num_proc（使用 -l p=X）
 ```
 
 **重要说明**：
@@ -218,12 +323,12 @@ annotask qsubsge -i input.sh --cpu 4 --h_vmem 5 --pesmp
 - `-P/--sge-project` 用于 SGE 资源配额管理，如果未设置则不在 DRMAA 中使用 `-P` 参数
 
 **并行环境模式**：
-- **默认模式**（不设置 `--pesmp`）：使用 `-l p=X` 指定 CPU 数量
-  - 示例：`--cpu 4 --h_vmem 18` → `-l h_vmem=18G,p=4`
-  - 这里内存指的总内存
-- **PE SMP 模式**（设置 `--pesmp`）：使用 `-pe smp X` 指定 CPU 数量
-  - 示例：`--cpu 4 --h_vmem 5 --pesmp` → `-l h_vmem=5G -pe smp 4`
-  - 这里的内存指的是单cpu需要消耗的内存
+- **pe_smp 模式**（默认，`--mode pe_smp`）：使用 `-pe smp X` 指定 CPU 数量
+  - 示例：`--cpu 4 --h_vmem 5` → `-l h_vmem=5G -pe smp 4`
+  - 这里的内存指的是单 CPU 需要消耗的内存
+- **num_proc 模式**（`--mode num_proc`）：使用 `-l p=X` 指定 CPU 数量
+  - 示例：`--cpu 4 --h_vmem 18 --mode num_proc` → `-l h_vmem=18G,p=4`
+  - 这里的内存指的是总内存
 
 ### 注意事项
 

@@ -15,7 +15,7 @@ export CGO_LDFLAGS="-L/opt/gridengine/lib/lx-amd64 -ldrmaa -Wl,-rpath,/opt/gride
 export LD_LIBRARY_PATH=/opt/gridengine/lib/lx-amd64:$LD_LIBRARY_PATH
 
 # 安装（从 GitHub 下载并编译指定版本）
-CGO_ENABLED=1 go install github.com/seqyuan/annotask/cmd/annotask@v1.8.0
+CGO_ENABLED=1 go install github.com/seqyuan/annotask/cmd/annotask@v1.8.2
 ```
 
 **优点**：编译后的二进制文件可直接运行，不需要运行时设置环境变量或包装脚本。
@@ -29,7 +29,7 @@ CGO_ENABLED=1 go install github.com/seqyuan/annotask/cmd/annotask@v1.8.0
 export CGO_CFLAGS="-I/opt/gridengine/include"
 export CGO_LDFLAGS="-L/opt/gridengine/lib/lx-amd64 -ldrmaa"
 export LD_LIBRARY_PATH=/opt/gridengine/lib/lx-amd64:$LD_LIBRARY_PATH
-CGO_ENABLED=1 go install github.com/seqyuan/annotask/cmd/annotask@v1.8.0
+CGO_ENABLED=1 go install github.com/seqyuan/annotask/cmd/annotask@v1.8.2
 ```
 
 ```bash

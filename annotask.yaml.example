@@ -35,3 +35,11 @@ defaults:
   # Note: mem and h_vmem are not configured here. They must be explicitly set
   # via --mem and --h_vmem flags if needed for qsubsge mode
 
+# Monitor update interval (in seconds)
+# Controls how often the global database is updated with task status
+# Lower values (10-30): More real-time updates, but higher database load
+# Higher values (60-120): Less database load, but updates are less frequent
+# Default: 60 seconds (1 minute)
+# Recommended: 60 seconds for better concurrency when many users are running tasks
+monitor_update_interval: 60
+

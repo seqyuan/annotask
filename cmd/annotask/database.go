@@ -19,9 +19,22 @@ func InitGlobalDB(dbPath string) (*GlobalDB, error) {
 		return nil, fmt.Errorf("failed to create db directory: %v", err)
 	}
 
-	conn, err := sql.Open("sqlite3", dbPath)
+	// Enable WAL mode and set busy_timeout for better concurrency
+	// WAL mode allows multiple readers and one writer concurrently
+	// busy_timeout makes SQLite wait up to 5 seconds for locks instead of failing immediately
+	conn, err := sql.Open("sqlite3", dbPath+"?_journal_mode=WAL&_busy_timeout=5000")
 	if err != nil {
 		return nil, fmt.Errorf("failed to open global db: %v", err)
+	}
+
+	// Verify WAL mode is enabled (optional, for debugging)
+	// If WAL mode cannot be enabled (e.g., on read-only filesystem), it will fall back to default
+	var journalMode string
+	err = conn.QueryRow("PRAGMA journal_mode").Scan(&journalMode)
+	if err == nil {
+		if journalMode != "wal" {
+			log.Printf("Warning: WAL mode not enabled, using %s mode. Database may have lower concurrency performance.", journalMode)
+		}
 	}
 
 	globalDB := &GlobalDB{Db: conn}
@@ -216,23 +229,31 @@ func GetTaskStats(dbObj *MySql) (total, pending, failed, running, finished int, 
 }
 
 // UpdateGlobalTaskRecord updates or creates a task record in global database
+// Uses transaction to ensure atomicity and prevent race conditions
 func UpdateGlobalTaskRecord(globalDB *GlobalDB, usrID, project, module, mode, shellPath string, startTime time.Time, total, pending, failed, running, finished int, node string) error {
 	startTimeStr := startTime.Format("2006-01-02 15:04:05")
 
+	// Use transaction to ensure atomicity of UPDATE + INSERT operation
+	tx, err := globalDB.Db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %v", err)
+	}
+	defer tx.Rollback()
+
 	// Try to update existing record
 	// Update node field as well to ensure it reflects the current run's node (especially for local mode)
-	result, err := globalDB.Db.Exec(`
+	result, err := tx.Exec(`
 		UPDATE tasks SET 
 			pendingTasks=?, failedTasks=?, runningTasks=?, finishedTasks=?, totalTasks=?, node=?
 		WHERE usrID=? AND project=? AND module=? AND starttime=?
 	`, pending, failed, running, finished, total, node, usrID, project, module, startTimeStr)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to update task record: %v", err)
 	}
 
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to get rows affected: %v", err)
 	}
 
 	// If no rows affected, insert new record
@@ -243,11 +264,20 @@ func UpdateGlobalTaskRecord(globalDB *GlobalDB, usrID, project, module, mode, sh
 		} else if failed > 0 {
 			status = "failed"
 		}
-		_, err = globalDB.Db.Exec(`
-			INSERT INTO tasks(usrID, project, module, mode, starttime, shellPath, totalTasks, pendingTasks, failedTasks, runningTasks, finishedTasks, status, node)
+		// Use INSERT OR REPLACE to handle race condition where another process might have inserted
+		// This is safer than plain INSERT when there's a UNIQUE constraint
+		_, err = tx.Exec(`
+			INSERT OR REPLACE INTO tasks(usrID, project, module, mode, starttime, shellPath, totalTasks, pendingTasks, failedTasks, runningTasks, finishedTasks, status, node)
 			VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`, usrID, project, module, mode, startTimeStr, shellPath, total, pending, failed, running, finished, status, node)
-		return err
+		if err != nil {
+			return fmt.Errorf("failed to insert task record: %v", err)
+		}
+	}
+
+	// Commit transaction
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %v", err)
 	}
 
 	return nil

@@ -55,13 +55,13 @@ func closeDRMAASession() {
 	}
 }
 
-func IlterCommand(ctx context.Context, dbObj *MySql, thred int, need2run []int, mode JobMode, cpu, mem, h_vmem int, userSetMem, userSetHvmem bool, queue string, sgeProject string, usePesmp bool, write_pool *gpool.Pool) {
+func IlterCommand(ctx context.Context, dbObj *MySql, thred int, need2run []int, mode JobMode, cpu, mem, h_vmem int, userSetMem, userSetHvmem bool, queue string, sgeProject string, parallelEnvMode string, write_pool *gpool.Pool) {
 	pool := gpool.New(thred)
 
 	for _, N := range need2run {
 		pool.Add(1)
 		if mode == ModeQsubSge {
-			go SubmitQsubCommand(ctx, N, pool, dbObj, write_pool, cpu, mem, h_vmem, userSetMem, userSetHvmem, queue, sgeProject, usePesmp)
+			go SubmitQsubCommand(ctx, N, pool, dbObj, write_pool, cpu, mem, h_vmem, userSetMem, userSetHvmem, queue, sgeProject, parallelEnvMode)
 		} else {
 			go RunCommand(N, pool, dbObj, write_pool)
 		}
@@ -152,7 +152,7 @@ func RunCommand(N int, pool *gpool.Pool, dbObj *MySql, write_pool *gpool.Pool) {
 	CheckErr(err)
 }
 
-func SubmitQsubCommand(ctx context.Context, N int, pool *gpool.Pool, dbObj *MySql, write_pool *gpool.Pool, cpu, mem, h_vmem int, userSetMem, userSetHvmem bool, queue string, sgeProject string, usePesmp bool) {
+func SubmitQsubCommand(ctx context.Context, N int, pool *gpool.Pool, dbObj *MySql, write_pool *gpool.Pool, cpu, mem, h_vmem int, userSetMem, userSetHvmem bool, queue string, sgeProject string, parallelEnvMode string) {
 	defer pool.Done()
 
 	var subShellPath string
@@ -231,13 +231,33 @@ func SubmitQsubCommand(ctx context.Context, N int, pool *gpool.Pool, dbObj *MySq
 	subShellBase := filepath.Base(subShellPath)
 	subShellBaseNoExt := strings.TrimSuffix(subShellBase, filepath.Ext(subShellBase))
 
+	// Set working directory to script's directory
+	// This ensures output files are generated in the script's directory, not in home directory
+	if err := jt.SetWD(subShellDir); err != nil {
+		log.Printf("Warning: Could not set working directory: %v", err)
+	}
+
 	// Set job template properties
-	// Note: SetRemoteCommand sets the script path, which SGE will use as the command to execute
-	// The working directory will be automatically set to the script's directory by SGE
 	jt.SetRemoteCommand(subShellPath)
-	// Set job name to file prefix, so SGE will auto-generate output files as:
-	// {subShellBaseNoExt}.o.{jobID} and {subShellBaseNoExt}.e.{jobID}
+	// Set job name to file prefix (without .sh extension)
+	// SGE will generate output files as: {job_name}.o.{jobID} and {job_name}.e.{jobID}
 	jt.SetJobName(subShellBaseNoExt)
+
+	// Set output and error file paths explicitly
+	// Path format: {script_dir}/{job_name}.o and {script_dir}/{job_name}.e
+	// SGE will automatically append jobID to the filenames
+	// The exact format depends on SGE version:
+	// - Some versions: {job_name}.o.{jobID} and {job_name}.e.{jobID}
+	// - Other versions: {job_name}.o{jobID} and {job_name}.e{jobID}
+	// We handle both formats when reading the files
+	outputPath := filepath.Join(subShellDir, fmt.Sprintf("%s.o", subShellBaseNoExt))
+	errorPath := filepath.Join(subShellDir, fmt.Sprintf("%s.e", subShellBaseNoExt))
+	if err := jt.SetOutputPath(outputPath); err != nil {
+		log.Printf("Warning: Could not set output path: %v", err)
+	}
+	if err := jt.SetErrorPath(errorPath); err != nil {
+		log.Printf("Warning: Could not set error path: %v", err)
+	}
 
 	// Build nativeSpec with only SGE resource options
 	// Do NOT include -cwd or script path in nativeSpec
@@ -249,8 +269,8 @@ func SubmitQsubCommand(ctx context.Context, N int, pool *gpool.Pool, dbObj *MySq
 	// - --mem maps to -l vf=XG (virtual free memory)
 	// - --h_vmem maps to -l h_vmem=XG (hard virtual memory limit)
 	// Two parallel environment modes:
-	// - Default mode (usePesmp=false): -l h_vmem=XG,p=Y (p=cpu)
-	// - PE SMP mode (usePesmp=true): -l h_vmem=XG -pe smp Y (Y=cpu)
+	// - pe_smp mode (default): -l h_vmem=XG -pe smp Y (Y=cpu)
+	// - num_proc mode: -l h_vmem=XG,p=Y (p=cpu)
 	
 	// Build resource specification
 	var resourceSpecs []string
@@ -263,14 +283,12 @@ func SubmitQsubCommand(ctx context.Context, N int, pool *gpool.Pool, dbObj *MySq
 		resourceSpecs = append(resourceSpecs, fmt.Sprintf("h_vmem=%dG", h_vmem))
 	}
 	
-	// Add CPU specification based on mode
-	if usePesmp {
-		// PE SMP mode: CPU will be specified via -pe smp
-		// Don't add p=cpu to -l specification
-	} else {
-		// Default mode: add p=cpu to -l specification
+	// Add CPU specification based on parallel environment mode
+	if parallelEnvMode == "num_proc" {
+		// num_proc mode: add p=cpu to -l specification
 		resourceSpecs = append(resourceSpecs, fmt.Sprintf("p=%d", cpu))
 	}
+	// pe_smp mode: CPU will be specified via -pe smp (handled below)
 	
 	// Build nativeSpec
 	var nativeSpecParts []string
@@ -278,8 +296,8 @@ func SubmitQsubCommand(ctx context.Context, N int, pool *gpool.Pool, dbObj *MySq
 		nativeSpecParts = append(nativeSpecParts, fmt.Sprintf("-l %s", strings.Join(resourceSpecs, ",")))
 	}
 	
-	// Add PE SMP specification if enabled
-	if usePesmp {
+	// Add PE SMP specification if pe_smp mode
+	if parallelEnvMode == "pe_smp" {
 		nativeSpecParts = append(nativeSpecParts, fmt.Sprintf("-pe smp %d", cpu))
 	}
 	
@@ -397,8 +415,18 @@ func SubmitQsubCommand(ctx context.Context, N int, pool *gpool.Pool, dbObj *MySq
 			subShellBaseNoExt := strings.TrimSuffix(subShellBase, filepath.Ext(subShellBase))
 
 			// Check error file for memory-related errors
-			// Error file path: subShellDir/subShellBaseNoExt.e.jobID
+			// SGE generates output files in different formats depending on version:
+			// - Format 1: {job_name}.o.{jobID} and {job_name}.e.{jobID} (with dot separator)
+			// - Format 2: {job_name}.o{jobID} and {job_name}.e{jobID} (without dot separator)
+			// Try both formats to support different SGE versions
 			errFile := filepath.Join(subShellDir, fmt.Sprintf("%s.e.%s", subShellBaseNoExt, jobID))
+			if _, err := os.Stat(errFile); os.IsNotExist(err) {
+				// Try format without dot separator (some SGE versions use this)
+				errFileAlt := filepath.Join(subShellDir, fmt.Sprintf("%s.e%s", subShellBaseNoExt, jobID))
+				if _, err := os.Stat(errFileAlt); err == nil {
+					errFile = errFileAlt
+				}
+			}
 			if errData, readErr := os.ReadFile(errFile); readErr == nil {
 				errStr := string(errData)
 				errStrLower := strings.ToLower(errStr)

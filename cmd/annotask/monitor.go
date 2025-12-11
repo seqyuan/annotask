@@ -15,8 +15,15 @@ func MonitorTaskStatus(ctx context.Context, dbObj *MySql, globalDB *GlobalDB, us
 
 	// Map to track last known status for each task
 	lastStatus := make(map[int]TaskStatus)
-	headerPrinted := false                    // Track if header has been printed
-	ticker := time.NewTicker(1 * time.Second) // Check every second
+	headerPrinted := false // Track if header has been printed
+	
+	// Use configurable update interval (default: 5 seconds)
+	// This reduces database load and lock contention when many processes are running
+	updateInterval := 5 // Default fallback
+	if config != nil && config.MonitorUpdateInterval > 0 {
+		updateInterval = config.MonitorUpdateInterval
+	}
+	ticker := time.NewTicker(time.Duration(updateInterval) * time.Second)
 	defer ticker.Stop()
 
 	for {

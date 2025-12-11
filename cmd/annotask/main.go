@@ -8,7 +8,7 @@ import (
 
 // printModuleList prints list of available modules
 func printModuleList() {
-	fmt.Println("annotask - parallel task v1.8.0")
+	fmt.Println("annotask - parallel task v1.8.2")
 	fmt.Println()
 	fmt.Println("Available modules:")
 	fmt.Println("    local             Run tasks locally (default module)")
@@ -56,7 +56,7 @@ func printModuleHelp(module string, config *Config) {
 		fmt.Println("    --h_vmem          Hard virtual memory limit (h_vmem) in GB per task (only used if explicitly set)")
 		fmt.Println("    --queue            Queue name(s), comma-separated for multiple queues (default: from config)")
 		fmt.Println("    -P, --sge-project  SGE project name for resource quota management (default: from config)")
-		fmt.Println("    --pesmp            Use -pe smp parallel environment mode (default: use -l p=X mode)")
+		fmt.Println("    --mode             Parallel environment mode: pe_smp (use -pe smp X, default) or num_proc (use -l p=X)")
 	case "stat":
 		fmt.Println("annotask stat - Query task status from global database")
 		fmt.Println()
@@ -100,16 +100,19 @@ func isOption(arg string) bool {
 }
 
 func main() {
+	// If no arguments, ensure user config exists and show module list
+	if len(os.Args) == 1 {
+		if err := EnsureUserConfig(); err != nil {
+			log.Printf("Warning: Could not create user config: %v", err)
+		}
+		printModuleList()
+		return
+	}
+
 	// Load configuration
 	config, err := LoadConfig()
 	if err != nil {
 		log.Fatalf("Failed to load config: %v", err)
-	}
-
-	// If no arguments, show module list
-	if len(os.Args) == 1 {
-		printModuleList()
-		return
 	}
 
 	// Check if first argument is a module name

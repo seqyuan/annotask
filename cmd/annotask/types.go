@@ -61,6 +61,10 @@ type Config struct {
 		Thread int `yaml:"thread"`
 		CPU    int `yaml:"cpu"`
 	} `yaml:"defaults"`
+	// Monitor update interval in seconds (default: 5)
+	// Lower values provide more real-time updates but increase database load
+	// Higher values reduce database load but updates are less frequent
+	MonitorUpdateInterval int `yaml:"monitor_update_interval"`
 }
 
 // GlobalDB represents the global database connection
@@ -74,6 +78,14 @@ type JobMode string
 const (
 	ModeLocal   JobMode = "local"
 	ModeQsubSge JobMode = "qsubsge"
+)
+
+// ParallelEnvMode represents the parallel environment mode for qsubsge
+type ParallelEnvMode string
+
+const (
+	ParallelEnvPeSmp   ParallelEnvMode = "pe_smp"   // Use -pe smp X (default)
+	ParallelEnvNumProc ParallelEnvMode = "num_proc" // Use -l p=X
 )
 
 // jobStatusType represents the status of a job

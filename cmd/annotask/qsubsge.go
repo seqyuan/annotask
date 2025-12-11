@@ -41,7 +41,7 @@ func runQsubSgeMode(config *Config, args []string) {
 		sgeProjectHelp = fmt.Sprintf("%s (default: from config, or empty if not set)", sgeProjectHelp)
 	}
 	opt_sge_project := parser.String("P", "sge-project", &argparse.Options{Default: config.SgeProject, Help: sgeProjectHelp})
-	opt_pesmp := parser.Flag("", "pesmp", &argparse.Options{Help: "Use -pe smp parallel environment mode instead of default -l p=X mode"})
+	opt_mode := parser.String("", "mode", &argparse.Options{Default: "pe_smp", Help: "Parallel environment mode: pe_smp (use -pe smp X, default) or num_proc (use -l p=X)"})
 
 	// Check if user explicitly set --mem or --h_vmem before parsing
 	userSetMem := false
@@ -76,25 +76,32 @@ func runQsubSgeMode(config *Config, args []string) {
 	// Note: We don't auto-calculate h_vmem from mem anymore.
 	// Only use values that user explicitly set via --mem or --h_vmem flags.
 
-	// Get queue value (uses config.Queue as default if not set)
-	queue := ""
-	if opt_queue != nil {
-		queue = *opt_queue
+	// Get queue value
+	// If user explicitly set --queue, use it; otherwise use config.Queue (from user home or executable dir)
+	queue := config.Queue // Default from config (user home config takes precedence)
+	if opt_queue != nil && *opt_queue != "" {
+		queue = *opt_queue // Command line argument takes highest precedence
 	}
 
-	// Get SGE project value (uses config.SgeProject as default if not set)
-	sgeProject := ""
-	if opt_sge_project != nil {
-		sgeProject = *opt_sge_project
+	// Get SGE project value
+	// If user explicitly set -P/--sge-project, use it; otherwise use config.SgeProject
+	sgeProject := config.SgeProject // Default from config (user home config takes precedence)
+	if opt_sge_project != nil && *opt_sge_project != "" {
+		sgeProject = *opt_sge_project // Command line argument takes highest precedence
 	}
 
-	// Get pesmp flag value
-	usePesmp := false
-	if opt_pesmp != nil && *opt_pesmp {
-		usePesmp = true
+	// Get mode value and validate
+	mode := "pe_smp" // default
+	if opt_mode != nil && *opt_mode != "" {
+		mode = *opt_mode
+	}
+	
+	// Validate mode value
+	if mode != "pe_smp" && mode != "num_proc" {
+		log.Fatalf("Invalid --mode value: %s. Must be 'pe_smp' or 'num_proc'", mode)
 	}
 
-	runTasks(config, *opt_i, *opt_l, *opt_p, *opt_project, ModeQsubSge, *opt_cpu, mem, h_vmem, userSetMem, userSetHvmem, queue, sgeProject, usePesmp)
+	runTasks(config, *opt_i, *opt_l, *opt_p, *opt_project, ModeQsubSge, *opt_cpu, mem, h_vmem, userSetMem, userSetHvmem, queue, sgeProject, mode)
 	
 	// Close DRMAA session when qsubsge mode completes
 	closeDRMAASession()
