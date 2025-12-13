@@ -45,10 +45,25 @@ func RunStatCommand(globalDB *GlobalDB, projectFilter string, config *Config) er
 				continue
 			}
 
-			// Parse starttime
-			startTime, err := time.Parse("2006-01-02 15:04:05", starttime)
-			if err != nil {
-				log.Printf("Warning: Failed to parse starttime %s: %v", starttime, err)
+			// Parse starttime (support multiple formats: "2006-01-02 15:04:05" and ISO 8601 formats)
+			var startTime time.Time
+			formats := []string{
+				"2006-01-02 15:04:05",
+				time.RFC3339,     // "2006-01-02T15:04:05Z07:00"
+				"2006-01-02T15:04:05Z",
+				"2006-01-02T15:04:05",
+			}
+			parsed := false
+			for _, format := range formats {
+				if t, err := time.Parse(format, starttime); err == nil {
+					startTime = t
+					parsed = true
+					break
+				}
+			}
+			if !parsed {
+				// If parsing fails, skip this record silently
+				// formatTimeShort will handle the formatting with fallback logic
 				continue
 			}
 

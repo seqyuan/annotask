@@ -30,94 +30,118 @@ func MonitorTaskStatus(ctx context.Context, dbObj *MySql, globalDB *GlobalDB, us
 	lastStatus := make(map[int]TaskStatus)
 	headerPrinted := false // Track if header has been printed
 
-	// Use configurable update interval (default: 5 seconds)
+	// Log file update interval: real-time updates (short interval, e.g., 2 seconds)
+	// {script}.log is only written by one process, so it can update frequently
+	logUpdateInterval := 2 // seconds
+	logTicker := time.NewTicker(time.Duration(logUpdateInterval) * time.Second)
+	defer logTicker.Stop()
+
+	// Global database update interval: controlled by monitor_update_interval
 	// This reduces database load and lock contention when many processes are running
-	updateInterval := 60 // Default fallback
+	globalDBUpdateInterval := 60 // Default fallback
 	if config != nil && config.MonitorUpdateInterval > 0 {
-		updateInterval = config.MonitorUpdateInterval
+		globalDBUpdateInterval = config.MonitorUpdateInterval
 	}
-	ticker := time.NewTicker(time.Duration(updateInterval) * time.Second)
-	defer ticker.Stop()
+	globalDBTicker := time.NewTicker(time.Duration(globalDBUpdateInterval) * time.Second)
+	defer globalDBTicker.Stop()
+
+	// Helper function to update log file with current task status
+	updateLogFile := func() {
+		// Get current try round (MAX(retry) + 1, because initial run has retry=0)
+		var maxRetry int
+		err := dbObj.Db.QueryRow("SELECT COALESCE(MAX(retry), -1) FROM job").Scan(&maxRetry)
+		if err != nil {
+			log.Printf("Error querying max retry: %v", err)
+			return
+		}
+		currentRound := maxRetry + 1 // 0 -> 1, 1 -> 2, 2 -> 3
+		maxRetries := 3              // Default fallback
+		if config != nil {
+			maxRetries = config.Retry.Max
+		}
+
+		// Query all tasks
+		rows, err := dbObj.Db.Query(`
+			SELECT subJob_num, status, retry, taskid, starttime, endtime, exitCode 
+			FROM job 
+			ORDER BY subJob_num
+		`)
+		if err != nil {
+			log.Printf("Error querying task status: %v", err)
+			return
+		}
+		defer rows.Close()
+
+		// Track current status
+		currentStatus := make(map[int]TaskStatus)
+
+		// Print header on first iteration
+		if !headerPrinted {
+			printTaskHeader(logFile, &logMutex, maxRetries)
+			headerPrinted = true
+		}
+
+		for rows.Next() {
+			var ts TaskStatus
+			err := rows.Scan(&ts.subJobNum, &ts.status, &ts.retry, &ts.taskid, &ts.starttime, &ts.endtime, &ts.exitCode)
+			if err != nil {
+				log.Printf("Error scanning task status: %v", err)
+				continue
+			}
+			currentStatus[ts.subJobNum] = ts
+
+			// Skip output for Pending status
+			if ts.status == "Pending" {
+				continue
+			}
+
+			// Check if status changed
+			last, exists := lastStatus[ts.subJobNum]
+			if !exists {
+				// New task, output initial status
+				outputTaskStatus(logFile, &logMutex, ts, currentRound, maxRetries)
+			} else {
+				// Check if status, retry, or other fields changed
+				if last.status != ts.status || last.retry != ts.retry ||
+					last.taskid.String != ts.taskid.String ||
+					(ts.endtime.Valid && (!last.endtime.Valid || last.endtime.String != ts.endtime.String)) {
+					outputTaskStatus(logFile, &logMutex, ts, currentRound, maxRetries)
+				}
+			}
+		}
+
+		// Update lastStatus
+		lastStatus = currentStatus
+	}
+
+	// Helper function to update global database
+	updateGlobalDB := func() {
+		if globalDB != nil && config != nil {
+			total, pending, failed, running, finished, err := GetTaskStats(dbObj)
+			if err == nil {
+				node := GetNodeName(mode, config, dbObj)
+				pid := os.Getpid() // Get main process PID
+				err = UpdateGlobalTaskRecord(globalDB, usrID, project, module, mode, shellPath, startTime, total, pending, failed, running, finished, node, pid)
+				if err != nil {
+					log.Printf("Error updating global DB: %v", err)
+				}
+			}
+		}
+	}
+
+	// Perform initial update immediately
+	updateLogFile()
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
-			// Get current try round (MAX(retry) + 1, because initial run has retry=0)
-			var maxRetry int
-			err := dbObj.Db.QueryRow("SELECT COALESCE(MAX(retry), -1) FROM job").Scan(&maxRetry)
-			if err != nil {
-				log.Printf("Error querying max retry: %v", err)
-			}
-			currentRound := maxRetry + 1 // 0 -> 1, 1 -> 2, 2 -> 3
-			maxRetries := config.Retry.Max
-
-			// Query all tasks
-			rows, err := dbObj.Db.Query(`
-				SELECT subJob_num, status, retry, taskid, starttime, endtime, exitCode 
-				FROM job 
-				ORDER BY subJob_num
-			`)
-			if err != nil {
-				log.Printf("Error querying task status: %v", err)
-				continue
-			}
-
-			// Track current status
-			currentStatus := make(map[int]TaskStatus)
-
-			// Print header on first iteration
-			if !headerPrinted {
-				printTaskHeader(logFile, &logMutex, maxRetries)
-				headerPrinted = true
-			}
-
-			for rows.Next() {
-				var ts TaskStatus
-				err := rows.Scan(&ts.subJobNum, &ts.status, &ts.retry, &ts.taskid, &ts.starttime, &ts.endtime, &ts.exitCode)
-				if err != nil {
-					log.Printf("Error scanning task status: %v", err)
-					continue
-				}
-				currentStatus[ts.subJobNum] = ts
-
-				// Skip output for Pending status
-				if ts.status == "Pending" {
-					continue
-				}
-
-				// Check if status changed
-				last, exists := lastStatus[ts.subJobNum]
-				if !exists {
-					// New task, output initial status
-					outputTaskStatus(logFile, &logMutex, ts, currentRound, maxRetries)
-				} else {
-					// Check if status, retry, or other fields changed
-					if last.status != ts.status || last.retry != ts.retry ||
-						last.taskid.String != ts.taskid.String ||
-						(ts.endtime.Valid && (!last.endtime.Valid || last.endtime.String != ts.endtime.String)) {
-						outputTaskStatus(logFile, &logMutex, ts, currentRound, maxRetries)
-					}
-				}
-			}
-			rows.Close()
-
-			// Update global database
-			if globalDB != nil && config != nil {
-				total, pending, failed, running, finished, err := GetTaskStats(dbObj)
-				if err == nil {
-					node := GetNodeName(mode, config, dbObj)
-					pid := os.Getpid() // Get main process PID
-					err = UpdateGlobalTaskRecord(globalDB, usrID, project, module, mode, shellPath, startTime, total, pending, failed, running, finished, node, pid)
-					if err != nil {
-						log.Printf("Error updating global DB: %v", err)
-					}
-				}
-			}
-
-			// Update lastStatus
-			lastStatus = currentStatus
+		case <-logTicker.C:
+			// Update log file in real-time
+			updateLogFile()
+		case <-globalDBTicker.C:
+			// Update global database at configured interval
+			updateGlobalDB()
 		}
 	}
 }
@@ -127,6 +151,7 @@ func printTaskHeader(logFile *os.File, logMutex *sync.Mutex, maxRetries int) {
 	logMutex.Lock()
 	defer logMutex.Unlock()
 	fmt.Fprintf(logFile, "%-6s %-6s %-10s %-10s %-8s %-12s\n", "try", "task", "status", "taskid", "exitcode", "time")
+	logFile.Sync() // Force flush to disk for real-time visibility
 }
 
 // outputTaskStatus outputs task status to log file in table format
@@ -168,4 +193,5 @@ func outputTaskStatus(logFile *os.File, logMutex *sync.Mutex, ts TaskStatus, cur
 	defer logMutex.Unlock()
 	fmt.Fprintf(logFile, "%-6s %-6s %-10s %-10s %-8s %-12s\n",
 		tryStr, taskNumStr, ts.status, taskidStr, exitCodeStr, timeStr)
+	logFile.Sync() // Force flush to disk for real-time visibility
 }
