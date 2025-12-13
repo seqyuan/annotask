@@ -95,6 +95,16 @@ func InitGlobalDB(dbPath string) (*GlobalDB, error) {
 		}
 	}
 
+	// Migrate: add pid column if it doesn't exist
+	var pidExists bool
+	err = conn.QueryRow("SELECT COUNT(*) FROM pragma_table_info('tasks') WHERE name='pid'").Scan(&pidExists)
+	if err == nil && !pidExists {
+		_, err = conn.Exec("ALTER TABLE tasks ADD COLUMN pid INTEGER")
+		if err != nil {
+			log.Printf("Warning: Could not add pid column: %v", err)
+		}
+	}
+
 	_, err = conn.Exec(sql_table)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create table: %v", err)
@@ -178,6 +188,83 @@ func (sqObj *MySql) UpdateModeForUnfinished(mode JobMode) {
 	}
 }
 
+// CheckSignFilesAndUpdateStatus checks .sign files for all tasks and updates their status
+// Tasks with .sign files are marked as finished, others are marked as pending
+func CheckSignFilesAndUpdateStatus(dbObj *MySql) error {
+	tx, err := dbObj.Db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %v", err)
+	}
+	defer tx.Rollback()
+
+	// Query all tasks
+	rows, err := tx.Query("SELECT subJob_num, shellPath, status FROM job")
+	if err != nil {
+		return fmt.Errorf("failed to query tasks: %v", err)
+	}
+	defer rows.Close()
+
+	now := time.Now().Format("2006-01-02 15:04:05")
+	var finishedCount int
+	var pendingCount int
+
+	for rows.Next() {
+		var subJobNum int
+		var shellPath string
+		var currentStatus string
+
+		err := rows.Scan(&subJobNum, &shellPath, &currentStatus)
+		if err != nil {
+			log.Printf("Warning: Failed to scan task: %v", err)
+			continue
+		}
+
+		// Check if .sign file exists
+		signFile := fmt.Sprintf("%s.sign", shellPath)
+		if _, statErr := os.Stat(signFile); statErr == nil {
+			// .sign file exists, task is finished
+			if currentStatus != string(J_finished) {
+				_, err = tx.Exec(`
+					UPDATE job 
+					SET status=?, endtime=?, exitCode=? 
+					WHERE subJob_num=?
+				`, J_finished, now, 0, subJobNum)
+				if err != nil {
+					log.Printf("Warning: Failed to update task %d to finished: %v", subJobNum, err)
+				} else {
+					finishedCount++
+				}
+			}
+		} else {
+			// .sign file doesn't exist, task should be pending
+			// Update to pending regardless of current status (because .sign file is the source of truth)
+			if currentStatus != string(J_pending) {
+				_, err = tx.Exec(`
+					UPDATE job 
+					SET status=?, endtime=NULL, exitCode=NULL, taskid=NULL 
+					WHERE subJob_num=?
+				`, J_pending, subJobNum)
+				if err != nil {
+					log.Printf("Warning: Failed to update task %d to pending: %v", subJobNum, err)
+				} else {
+					pendingCount++
+				}
+			}
+		}
+	}
+
+	err = tx.Commit()
+	if err != nil {
+		return fmt.Errorf("failed to commit transaction: %v", err)
+	}
+
+	if finishedCount > 0 || pendingCount > 0 {
+		log.Printf("Updated %d tasks to finished, %d tasks to pending based on .sign files", finishedCount, pendingCount)
+	}
+
+	return nil
+}
+
 func GetNeed2Run(dbObj *MySql) []int {
 	tx, _ := dbObj.Db.Begin()
 	defer tx.Rollback()
@@ -230,7 +317,7 @@ func GetTaskStats(dbObj *MySql) (total, pending, failed, running, finished int, 
 
 // UpdateGlobalTaskRecord updates or creates a task record in global database
 // Uses transaction to ensure atomicity and prevent race conditions
-func UpdateGlobalTaskRecord(globalDB *GlobalDB, usrID, project, module, mode, shellPath string, startTime time.Time, total, pending, failed, running, finished int, node string) error {
+func UpdateGlobalTaskRecord(globalDB *GlobalDB, usrID, project, module, mode, shellPath string, startTime time.Time, total, pending, failed, running, finished int, node string, pid int) error {
 	startTimeStr := startTime.Format("2006-01-02 15:04:05")
 
 	// Use transaction to ensure atomicity of UPDATE + INSERT operation
@@ -241,12 +328,12 @@ func UpdateGlobalTaskRecord(globalDB *GlobalDB, usrID, project, module, mode, sh
 	defer tx.Rollback()
 
 	// Try to update existing record
-	// Update node field as well to ensure it reflects the current run's node (especially for local mode)
+	// Update node and pid fields as well to ensure they reflect the current run
 	result, err := tx.Exec(`
 		UPDATE tasks SET 
-			pendingTasks=?, failedTasks=?, runningTasks=?, finishedTasks=?, totalTasks=?, node=?
+			pendingTasks=?, failedTasks=?, runningTasks=?, finishedTasks=?, totalTasks=?, node=?, pid=?
 		WHERE usrID=? AND project=? AND module=? AND starttime=?
-	`, pending, failed, running, finished, total, node, usrID, project, module, startTimeStr)
+	`, pending, failed, running, finished, total, node, pid, usrID, project, module, startTimeStr)
 	if err != nil {
 		return fmt.Errorf("failed to update task record: %v", err)
 	}
@@ -267,9 +354,9 @@ func UpdateGlobalTaskRecord(globalDB *GlobalDB, usrID, project, module, mode, sh
 		// Use INSERT OR REPLACE to handle race condition where another process might have inserted
 		// This is safer than plain INSERT when there's a UNIQUE constraint
 		_, err = tx.Exec(`
-			INSERT OR REPLACE INTO tasks(usrID, project, module, mode, starttime, shellPath, totalTasks, pendingTasks, failedTasks, runningTasks, finishedTasks, status, node)
-			VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		`, usrID, project, module, mode, startTimeStr, shellPath, total, pending, failed, running, finished, status, node)
+			INSERT OR REPLACE INTO tasks(usrID, project, module, mode, starttime, shellPath, totalTasks, pendingTasks, failedTasks, runningTasks, finishedTasks, status, node, pid)
+			VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`, usrID, project, module, mode, startTimeStr, shellPath, total, pending, failed, running, finished, status, node, pid)
 		if err != nil {
 			return fmt.Errorf("failed to insert task record: %v", err)
 		}

@@ -226,20 +226,38 @@ func SubmitQsubCommand(ctx context.Context, N int, pool *gpool.Pool, dbObj *MySq
 	}
 	defer session.DeleteJobTemplate(&jt)
 
+	// Ensure subShellPath is absolute (required for SGE to correctly determine working directory)
+	absSubShellPath, err := filepath.Abs(subShellPath)
+	if err != nil {
+		write_pool.Add(1)
+		now = time.Now().Format("2006-01-02 15:04:05")
+		retry++
+		pathErr := err // Save original error before database update
+		_, dbErr := dbObj.Db.Exec("UPDATE job set status=?, endtime=?, exitCode=?, retry=? where subJob_num=?", J_failed, now, 1, retry, N)
+		write_pool.Done()
+		if dbErr != nil {
+			log.Printf("Error updating database: %v", dbErr)
+		}
+		if pathErr != nil {
+			log.Printf("Error getting absolute path for script: %v", pathErr)
+		}
+		return
+	}
+	subShellPath = absSubShellPath
+	
 	// Get directory and base name of subShellPath
 	subShellDir := filepath.Dir(subShellPath)
 	subShellBase := filepath.Base(subShellPath)
-	subShellBaseNoExt := strings.TrimSuffix(subShellBase, filepath.Ext(subShellBase))
 
 	// Set job template properties
 	// Use absolute script path to ensure SGE can find the script
 	// Following goqsub's approach: don't set output paths explicitly, let SGE auto-generate them
 	jt.SetRemoteCommand(subShellPath)
-	// Set job name to file prefix (without .sh extension)
+	// Set job name to script base name (with .sh extension), matching goqsub's implementation
 	// SGE will auto-generate output files as: {job_name}.o.{jobID} and {job_name}.e.{jobID}
-	// For example: task_0001.o.8944790 and task_0001.e.8944790
+	// For example: task_0001.sh.o.8944790 and task_0001.sh.e.8944790
 	// Output files will be generated in the script's directory (via -cwd in nativeSpec)
-	jt.SetJobName(subShellBaseNoExt)
+	jt.SetJobName(subShellBase)
 	// Note: We don't call SetOutputPath/SetErrorPath - let SGE auto-generate based on job name
 	// This matches goqsub's implementation and avoids DRMAA path format issues
 
@@ -279,7 +297,9 @@ func SubmitQsubCommand(ctx context.Context, N int, pool *gpool.Pool, dbObj *MySq
 		resourceSpecs = append(resourceSpecs, fmt.Sprintf("p=%d", cpu))
 	}
 	
-	// Add -cwd and -b n (non-binary mode, use shell) to match goqsub
+	// Add -cwd to use current working directory (where qsub was executed) as job's working directory
+	// -cwd is a boolean flag in SGE and does not accept a path argument
+	// -b n means non-binary mode (use shell)
 	nativeSpecParts = append(nativeSpecParts, "-cwd", "-b n")
 	
 	// Add resource specifications if any
@@ -398,17 +418,17 @@ func SubmitQsubCommand(ctx context.Context, N int, pool *gpool.Pool, dbObj *MySq
 			// Get directory and base name of subShellPath
 			subShellDir := filepath.Dir(subShellPath)
 			subShellBase := filepath.Base(subShellPath)
-			subShellBaseNoExt := strings.TrimSuffix(subShellBase, filepath.Ext(subShellBase))
 
 			// Check error file for memory-related errors
 			// SGE generates output files in different formats depending on version:
 			// - Format 1: {job_name}.o.{jobID} and {job_name}.e.{jobID} (with dot separator)
 			// - Format 2: {job_name}.o{jobID} and {job_name}.e{jobID} (without dot separator)
 			// Try both formats to support different SGE versions
-			errFile := filepath.Join(subShellDir, fmt.Sprintf("%s.e.%s", subShellBaseNoExt, jobID))
+			// Note: job_name includes .sh extension (e.g., task_0001.sh)
+			errFile := filepath.Join(subShellDir, fmt.Sprintf("%s.e.%s", subShellBase, jobID))
 			if _, err := os.Stat(errFile); os.IsNotExist(err) {
 				// Try format without dot separator (some SGE versions use this)
-				errFileAlt := filepath.Join(subShellDir, fmt.Sprintf("%s.e%s", subShellBaseNoExt, jobID))
+				errFileAlt := filepath.Join(subShellDir, fmt.Sprintf("%s.e%s", subShellBase, jobID))
 				if _, err := os.Stat(errFileAlt); err == nil {
 					errFile = errFileAlt
 				}

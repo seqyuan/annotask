@@ -18,21 +18,21 @@ func RunStatCommand(globalDB *GlobalDB, projectFilter string) error {
 	var err error
 
 	if projectFilter != "" {
-		// When -p is used, show different format: module pending running failed finished stime etime
+		// When -p is used, show different format: id module pending running failed finished stime etime
 		rows, err = globalDB.Db.Query(`
-			SELECT module, pendingTasks, runningTasks, failedTasks, finishedTasks, starttime, endtime, shellPath
+			SELECT Id, module, pendingTasks, runningTasks, failedTasks, finishedTasks, starttime, endtime, shellPath
 			FROM tasks
 			WHERE usrID=? AND project=?
 			ORDER BY starttime DESC
 		`, usrID, projectFilter)
-		if err != nil {
-			return fmt.Errorf("failed to query tasks: %v", err)
-		}
-		defer rows.Close()
+	if err != nil {
+		return fmt.Errorf("failed to query tasks: %v", err)
+	}
+	defer rows.Close()
 
-		// First output table: module pending running failed finished stime etime
-		fmt.Printf("%-20s %-8s %-8s %-8s %-9s %-12s %-12s\n",
-			"module", "pending", "running", "failed", "finished", "stime", "etime")
+		// First output table: id module pending running failed finished stime etime
+		fmt.Printf("%-6s %-20s %-8s %-8s %-8s %-9s %-12s %-12s\n",
+			"id", "module", "pending", "running", "failed", "finished", "stime", "etime")
 
 		var modules []struct {
 			module    string
@@ -40,11 +40,12 @@ func RunStatCommand(globalDB *GlobalDB, projectFilter string) error {
 		}
 
 		for rows.Next() {
+			var id int
 			var module, starttime, shellPath string
 			var pending, running, failed, finished int
 			var endtime sql.NullString
 
-			err := rows.Scan(&module, &pending, &running, &failed, &finished, &starttime, &endtime, &shellPath)
+			err := rows.Scan(&id, &module, &pending, &running, &failed, &finished, &starttime, &endtime, &shellPath)
 			if err != nil {
 				log.Printf("Error scanning row: %v", err)
 				continue
@@ -57,8 +58,8 @@ func RunStatCommand(globalDB *GlobalDB, projectFilter string) error {
 				etimeStr = formatTimeShort(endtime.String)
 			}
 
-			fmt.Printf("%-20s %-8d %-8d %-8d %-9d %-12s %-12s\n",
-				module, pending, running, failed, finished, stimeStr, etimeStr)
+			fmt.Printf("%-6d %-20s %-8d %-8d %-8d %-9d %-12s %-12s\n",
+				id, module, pending, running, failed, finished, stimeStr, etimeStr)
 
 			// Store module and shellPath for later output
 			modules = append(modules, struct {

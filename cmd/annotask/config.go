@@ -97,8 +97,9 @@ func LoadConfig() (*Config, error) {
 		systemDbPath = defaultDbPath
 	}
 
-	// Then, load from user home config (if exists) - this takes precedence
-	var userDbPath string
+	// Then, load from user home config (if exists) - this takes precedence for non-db settings
+	// BUT: For global database path, we ALWAYS use executable directory config (not user home)
+	// This ensures all annotask instances use the same global database
 	if _, err := os.Stat(userConfigPath); err == nil {
 		data, err := os.ReadFile(userConfigPath)
 		if err != nil {
@@ -108,45 +109,22 @@ func LoadConfig() (*Config, error) {
 		if err := yaml.Unmarshal(data, &userConfig); err != nil {
 			return nil, fmt.Errorf("failed to parse user config file: %v", err)
 		}
-		// Save user db path before merging
-		if userConfig.Db != "" {
-			userDbPath = userConfig.Db
-		}
-		// Merge user config (takes precedence)
+		// Temporarily save current Db value (from system config)
+		currentDbPath := config.Db
+		// Merge user config (takes precedence for non-db settings)
 		mergeConfig(config, &userConfig)
+		// Restore system db path (don't use user's db path for global database)
+		config.Db = currentDbPath
 	}
 
-	// Check if user config's db path exists, if not, fall back to system db path
-	if userDbPath != "" {
-		// Check if user db path exists (file or directory exists)
-		if _, err := os.Stat(userDbPath); err == nil {
-			// User db path exists, use it
-			config.Db = userDbPath
-		} else {
-			// User db path doesn't exist, check if system db path exists
-			if systemDbPath != "" {
-				if _, err := os.Stat(systemDbPath); err == nil {
-					// System db path exists, use it
-					config.Db = systemDbPath
-					log.Printf("User db path (%s) doesn't exist, using system db path: %s", userDbPath, systemDbPath)
-				} else {
-					// Neither exists, use user db path (will be created)
-					config.Db = userDbPath
-				}
-			} else {
-				// No system db path, use user db path (will be created)
-				config.Db = userDbPath
-			}
-		}
-	} else if systemDbPath != "" {
-		// No user db path configured, check if system db path exists
-		if _, err := os.Stat(systemDbPath); err == nil {
-			// System db path exists, use it
-			config.Db = systemDbPath
-		} else {
-			// System db path doesn't exist, use default user db path (will be created)
-			config.Db = defaultDbPath
-		}
+	// For global database, ALWAYS use executable directory config's db path (not user home)
+	// If system db path is configured, use it; otherwise use default (which will be created)
+	if systemDbPath != "" {
+		// Use system db path from executable directory config
+		config.Db = systemDbPath
+	} else {
+		// No system db path configured, use default (will be created)
+		config.Db = defaultDbPath
 	}
 
 	// If node is empty or nil, initialize as empty slice
@@ -188,10 +166,8 @@ func mergeConfig(target, source *Config) {
 	if source.MonitorUpdateInterval > 0 {
 		target.MonitorUpdateInterval = source.MonitorUpdateInterval
 	}
-	// Db will be handled separately in LoadConfig with existence check
-	if source.Db != "" {
-		target.Db = source.Db
-	}
+	// Db is NOT merged here - it should always use executable directory config
+	// to ensure all annotask instances use the same global database
 }
 
 // EnsureUserConfig creates user home config file if it doesn't exist

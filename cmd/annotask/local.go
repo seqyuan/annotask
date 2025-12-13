@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -68,6 +69,14 @@ func runTasks(config *Config, infile string, line, thread int, project string, m
 	startTime := time.Now()
 
 	dbObj := Creat_tb(infile, line, mode)
+	
+	// Check .sign files and update task status before starting
+	// Tasks with .sign files are marked as finished, others are marked as pending
+	err = CheckSignFilesAndUpdateStatus(dbObj)
+	if err != nil {
+		log.Printf("Warning: Failed to check sign files: %v", err)
+	}
+	
 	need2run := GetNeed2Run(dbObj)
 	fmt.Println(need2run)
 
@@ -81,15 +90,20 @@ func runTasks(config *Config, infile string, line, thread int, project string, m
 	// This prevents WaitGroup reuse issues when monitoring loops continue after IlterCommand returns
 	write_pool := gpool.New(1)
 
-	// Retry loop for failed tasks
-	maxRetries := config.Retry.Max
-	for retryCount := 0; retryCount < maxRetries; retryCount++ {
-		IlterCommand(ctx, dbObj, thread, need2run, mode, cpu, mem, h_vmem, userSetMem, userSetHvmem, queue, sgeProject, parallelEnvMode, write_pool)
-		need2run = GetNeed2Run(dbObj)
-		if len(need2run) == 0 {
-			break
+	// Retry loop for failed tasks (only for qsubsge mode, local mode runs once)
+	if mode == ModeQsubSge {
+		maxRetries := config.Retry.Max
+		for retryCount := 0; retryCount < maxRetries; retryCount++ {
+			IlterCommand(ctx, dbObj, thread, need2run, mode, cpu, mem, h_vmem, userSetMem, userSetHvmem, queue, sgeProject, parallelEnvMode, write_pool)
+			need2run = GetNeed2Run(dbObj)
+			if len(need2run) == 0 {
+				break
+			}
+			time.Sleep(2 * time.Second)
 		}
-		time.Sleep(2 * time.Second)
+	} else {
+		// Local mode: run once without retry
+		IlterCommand(ctx, dbObj, thread, need2run, mode, cpu, mem, h_vmem, userSetMem, userSetHvmem, queue, sgeProject, parallelEnvMode, write_pool)
 	}
 
 	// Wait for all database write operations to complete
@@ -104,7 +118,8 @@ func runTasks(config *Config, infile string, line, thread int, project string, m
 	endTime := time.Now()
 	total, pending, failed, running, finished, _ := GetTaskStats(dbObj)
 	node := GetNodeName(string(mode), config, dbObj)
-	UpdateGlobalTaskRecord(globalDB, usrID, project, module, string(mode), shellAbsPath, startTime, total, pending, failed, running, finished, node)
+	pid := os.Getpid() // Get main process PID
+	UpdateGlobalTaskRecord(globalDB, usrID, project, module, string(mode), shellAbsPath, startTime, total, pending, failed, running, finished, node, pid)
 	// Update endtime
 	startTimeStr := startTime.Format("2006-01-02 15:04:05")
 	endTimeStr := endTime.Format("2006-01-02 15:04:05")

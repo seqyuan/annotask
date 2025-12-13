@@ -4,19 +4,32 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 	"strconv"
 	"sync"
 	"time"
 )
 
-// MonitorTaskStatus monitors database and outputs task status changes to stdout
+// MonitorTaskStatus monitors database and outputs task status changes to log file
 func MonitorTaskStatus(ctx context.Context, dbObj *MySql, globalDB *GlobalDB, usrID, project, module, mode, shellPath string, startTime time.Time, config *Config, wg *sync.WaitGroup) {
 	defer wg.Done()
+
+	// Open log file: shellPath.log (e.g., test.sh.log)
+	logFilePath := shellPath + ".log"
+	logFile, err := os.OpenFile(logFilePath, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0644)
+	if err != nil {
+		log.Printf("Error opening log file %s: %v", logFilePath, err)
+		return
+	}
+	defer logFile.Close()
+
+	// Mutex to protect concurrent writes to log file
+	var logMutex sync.Mutex
 
 	// Map to track last known status for each task
 	lastStatus := make(map[int]TaskStatus)
 	headerPrinted := false // Track if header has been printed
-	
+
 	// Use configurable update interval (default: 5 seconds)
 	// This reduces database load and lock contention when many processes are running
 	updateInterval := 5 // Default fallback
@@ -56,7 +69,7 @@ func MonitorTaskStatus(ctx context.Context, dbObj *MySql, globalDB *GlobalDB, us
 
 			// Print header on first iteration
 			if !headerPrinted {
-				printTaskHeader(maxRetries)
+				printTaskHeader(logFile, &logMutex, maxRetries)
 				headerPrinted = true
 			}
 
@@ -78,13 +91,13 @@ func MonitorTaskStatus(ctx context.Context, dbObj *MySql, globalDB *GlobalDB, us
 				last, exists := lastStatus[ts.subJobNum]
 				if !exists {
 					// New task, output initial status
-					outputTaskStatus(ts, currentRound, maxRetries)
+					outputTaskStatus(logFile, &logMutex, ts, currentRound, maxRetries)
 				} else {
 					// Check if status, retry, or other fields changed
 					if last.status != ts.status || last.retry != ts.retry ||
 						last.taskid.String != ts.taskid.String ||
 						(ts.endtime.Valid && (!last.endtime.Valid || last.endtime.String != ts.endtime.String)) {
-						outputTaskStatus(ts, currentRound, maxRetries)
+						outputTaskStatus(logFile, &logMutex, ts, currentRound, maxRetries)
 					}
 				}
 			}
@@ -95,7 +108,8 @@ func MonitorTaskStatus(ctx context.Context, dbObj *MySql, globalDB *GlobalDB, us
 				total, pending, failed, running, finished, err := GetTaskStats(dbObj)
 				if err == nil {
 					node := GetNodeName(mode, config, dbObj)
-					err = UpdateGlobalTaskRecord(globalDB, usrID, project, module, mode, shellPath, startTime, total, pending, failed, running, finished, node)
+					pid := os.Getpid() // Get main process PID
+					err = UpdateGlobalTaskRecord(globalDB, usrID, project, module, mode, shellPath, startTime, total, pending, failed, running, finished, node, pid)
 					if err != nil {
 						log.Printf("Error updating global DB: %v", err)
 					}
@@ -108,13 +122,15 @@ func MonitorTaskStatus(ctx context.Context, dbObj *MySql, globalDB *GlobalDB, us
 	}
 }
 
-// printTaskHeader prints the table header for task status output
-func printTaskHeader(maxRetries int) {
-	fmt.Printf("%-6s %-6s %-10s %-10s %-8s %-12s\n", "try", "task", "status", "taskid", "exitcode", "time")
+// printTaskHeader prints the table header for task status output to log file
+func printTaskHeader(logFile *os.File, logMutex *sync.Mutex, maxRetries int) {
+	logMutex.Lock()
+	defer logMutex.Unlock()
+	fmt.Fprintf(logFile, "%-6s %-6s %-10s %-10s %-8s %-12s\n", "try", "task", "status", "taskid", "exitcode", "time")
 }
 
-// outputTaskStatus outputs task status to stdout in table format
-func outputTaskStatus(ts TaskStatus, currentRound int, maxRetries int) {
+// outputTaskStatus outputs task status to log file in table format
+func outputTaskStatus(logFile *os.File, logMutex *sync.Mutex, ts TaskStatus, currentRound int, maxRetries int) {
 	// Format try column (current round : max retries), e.g., "1:3", "2:3", "3:3"
 	tryStr := fmt.Sprintf("%d:%d", currentRound, maxRetries)
 
@@ -148,6 +164,8 @@ func outputTaskStatus(ts TaskStatus, currentRound int, maxRetries int) {
 	}
 
 	// Output in table format: try task status taskid exitcode time
-	fmt.Printf("%-6s %-6s %-10s %-10s %-8s %-12s\n",
+	logMutex.Lock()
+	defer logMutex.Unlock()
+	fmt.Fprintf(logFile, "%-6s %-6s %-10s %-10s %-8s %-12s\n",
 		tryStr, taskNumStr, ts.status, taskidStr, exitCodeStr, timeStr)
 }
