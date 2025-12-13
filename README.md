@@ -4,7 +4,7 @@
 
 <p align="center">
   <h2>annotask</h2>
-  <p><strong>Annotation Task</strong> - 并行任务执行工具</p>
+  <p><strong>Annoroad parallel task tool</strong> - 并行任务执行工具</p>
   <p>A Go binary for parallel task execution with local and SGE cluster support</p>
 </p>
 
