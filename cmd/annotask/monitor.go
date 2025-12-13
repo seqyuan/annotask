@@ -32,7 +32,7 @@ func MonitorTaskStatus(ctx context.Context, dbObj *MySql, globalDB *GlobalDB, us
 
 	// Use configurable update interval (default: 5 seconds)
 	// This reduces database load and lock contention when many processes are running
-	updateInterval := 5 // Default fallback
+	updateInterval := 60 // Default fallback
 	if config != nil && config.MonitorUpdateInterval > 0 {
 		updateInterval = config.MonitorUpdateInterval
 	}

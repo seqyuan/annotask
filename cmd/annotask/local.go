@@ -90,6 +90,31 @@ func runTasks(config *Config, infile string, line, thread int, project string, m
 	// This prevents WaitGroup reuse issues when monitoring loops continue after IlterCommand returns
 	write_pool := gpool.New(1)
 
+	// For qsubsge mode, change to script directory before submitting jobs
+	// This ensures that -cwd will set SGE's working directory to script directory
+	// so output files (task_00XX.sh.o{jobid}) are generated in the script's directory
+	// All sub-task scripts are in {script}.shell folder, so we only need to chdir once
+	if mode == ModeQsubSge {
+		scriptDir := shellAbsPath + ".shell"
+		originalDir, err := os.Getwd()
+		if err != nil {
+			log.Fatalf("Failed to get current working directory: %v", err)
+		}
+		
+		// Switch to script directory before submitting jobs
+		err = os.Chdir(scriptDir)
+		if err != nil {
+			log.Fatalf("Failed to change to script directory %s: %v", scriptDir, err)
+		}
+		
+		// Restore original directory after all jobs are submitted
+		defer func() {
+			if restoreErr := os.Chdir(originalDir); restoreErr != nil {
+				log.Printf("Warning: Failed to restore original directory %s: %v", originalDir, restoreErr)
+			}
+		}()
+	}
+
 	// Retry loop for failed tasks (only for qsubsge mode, local mode runs once)
 	if mode == ModeQsubSge {
 		maxRetries := config.Retry.Max

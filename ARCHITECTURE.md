@@ -133,24 +133,6 @@ annotask/
 - 常量定义
 - 枚举类型
 
-## 冗余文件分析
-
-### ✅ 冗余文件已清理
-
-`cmd/annotask/cmd/` 目录已删除（2025-12-09）
-
-**已删除的文件**:
-- `cmd/annotask/cmd/local.go`
-- `cmd/annotask/cmd/stat.go`
-- `cmd/annotask/cmd/delete.go`
-- `cmd/annotask/cmd/qsubsge.go`
-
-**原因**:
-1. 没有任何代码引用该目录下的文件
-2. `main.go` 只调用 `cmd/annotask/` 目录下的函数
-3. 该目录下的文件是旧版本备份，内容已过时
-4. 编译时不会包含这些文件（Go只编译同一包下的文件）
-
 ## 依赖关系
 
 ```
@@ -186,18 +168,4 @@ stat.go / delete.go
 - `github.com/dgruber/drmaa` - DRMAA库（SGE支持）
 - `gopkg.in/yaml.v3` - YAML配置文件解析
 - `pkg/gpool` - 内部并发池实现
-
-## 代码统计
-
-- **Go文件总数**: 14个
-  - 主程序: 13个（cmd/annotask/）
-  - 公共包: 1个（pkg/gpool/）
-
-- **所有文件均为必需文件，无冗余**
-
-## 建议
-
-1. ✅ **冗余文件已清理**: `cmd/annotask/cmd/` 目录已删除
-2. **保持当前架构**: 模块化设计清晰，职责分离明确
-3. **文档同步**: README 和 UPDATE.md 已反映当前架构
 

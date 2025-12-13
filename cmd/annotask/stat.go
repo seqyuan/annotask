@@ -6,16 +6,103 @@ import (
 	"log"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/akamensky/argparse"
+	_ "github.com/mattn/go-sqlite3"
 )
 
 // RunStatCommand runs the stat subcommand
-func RunStatCommand(globalDB *GlobalDB, projectFilter string) error {
+func RunStatCommand(globalDB *GlobalDB, projectFilter string, config *Config) error {
 	usrID := GetCurrentUserID()
 
-	var rows *sql.Rows
+	// First, query all tasks to update them before displaying
+	var updateRows *sql.Rows
 	var err error
+
+	if projectFilter != "" {
+		updateRows, err = globalDB.Db.Query(`
+			SELECT shellPath, mode, project, module, starttime
+			FROM tasks
+			WHERE usrID=? AND project=?
+		`, usrID, projectFilter)
+	} else {
+		updateRows, err = globalDB.Db.Query(`
+			SELECT shellPath, mode, project, module, starttime
+			FROM tasks
+			WHERE usrID=?
+		`, usrID)
+	}
+
+	if err == nil {
+		defer updateRows.Close()
+		// Update each task's status from local database
+		for updateRows.Next() {
+			var shellPath, mode, project, module, starttime string
+			err := updateRows.Scan(&shellPath, &mode, &project, &module, &starttime)
+			if err != nil {
+				log.Printf("Warning: Failed to scan task for update: %v", err)
+				continue
+			}
+
+			// Parse starttime
+			startTime, err := time.Parse("2006-01-02 15:04:05", starttime)
+			if err != nil {
+				log.Printf("Warning: Failed to parse starttime %s: %v", starttime, err)
+				continue
+			}
+
+			// Open local database
+			dbPath := shellPath + ".db"
+			conn, err := sql.Open("sqlite3", dbPath)
+			if err != nil {
+				// Local database doesn't exist or can't be opened, skip
+				continue
+			}
+
+			dbObj := &MySql{Db: conn}
+			// Get task statistics from local database
+			total, pending, failed, running, finished, err := GetTaskStats(dbObj)
+			conn.Close()
+
+			if err != nil {
+				log.Printf("Warning: Failed to get task stats for %s: %v", shellPath, err)
+				continue
+			}
+
+			// Get node name (for local mode, need to open db again or pass nil)
+			node := "-"
+			if mode == "local" {
+				hostname, err := os.Hostname()
+				if err == nil {
+					node = hostname
+				}
+			}
+
+			// Get PID if process is still running (try to get from global DB first)
+			var pid int
+			var pidValue sql.NullInt64
+			err = globalDB.Db.QueryRow(`
+				SELECT pid FROM tasks 
+				WHERE usrID=? AND project=? AND module=? AND starttime=?
+			`, usrID, project, module, starttime).Scan(&pidValue)
+			if err == nil && pidValue.Valid {
+				pid = int(pidValue.Int64)
+			} else {
+				// If not found in DB, check if process exists (optional, could be 0)
+				pid = 0
+			}
+
+			// Update global database
+			err = UpdateGlobalTaskRecord(globalDB, usrID, project, module, mode, shellPath, startTime, total, pending, failed, running, finished, node, pid)
+			if err != nil {
+				log.Printf("Warning: Failed to update task record for %s: %v", shellPath, err)
+			}
+		}
+		updateRows.Close()
+	}
+
+	var rows *sql.Rows
 
 	if projectFilter != "" {
 		// When -p is used, show different format: id module pending running failed finished stime etime
@@ -25,17 +112,17 @@ func RunStatCommand(globalDB *GlobalDB, projectFilter string) error {
 			WHERE usrID=? AND project=?
 			ORDER BY starttime DESC
 		`, usrID, projectFilter)
-	if err != nil {
-		return fmt.Errorf("failed to query tasks: %v", err)
-	}
-	defer rows.Close()
+		if err != nil {
+			return fmt.Errorf("failed to query tasks: %v", err)
+		}
+		defer rows.Close()
 
 		// First output table: id module pending running failed finished stime etime
 		fmt.Printf("%-6s %-20s %-8s %-8s %-8s %-9s %-12s %-12s\n",
 			"id", "module", "pending", "running", "failed", "finished", "stime", "etime")
 
 		var modules []struct {
-			module    string
+			id        int
 			shellPath string
 		}
 
@@ -61,24 +148,24 @@ func RunStatCommand(globalDB *GlobalDB, projectFilter string) error {
 			fmt.Printf("%-6d %-20s %-8d %-8d %-8d %-9d %-12s %-12s\n",
 				id, module, pending, running, failed, finished, stimeStr, etimeStr)
 
-			// Store module and shellPath for later output
+			// Store id and shellPath for later output
 			modules = append(modules, struct {
-				module    string
+				id        int
 				shellPath string
-			}{module: module, shellPath: shellPath})
+			}{id: id, shellPath: shellPath})
 		}
 
-		// Then output shell paths for each module: module_shellPath
+		// Then output id and shell paths for each module: id shellPath
 		if len(modules) > 0 {
 			fmt.Println() // Empty line separator
 			for _, m := range modules {
-				fmt.Printf("%s_%s\n", m.module, m.shellPath)
+				fmt.Printf("%d %s\n", m.id, m.shellPath)
 			}
 		}
 	} else {
 		// When no -p, show: project module mode status statis stime etime
 		rows, err = globalDB.Db.Query(`
-			SELECT project, module, mode, status, totalTasks, pendingTasks, starttime, endtime
+			SELECT project, module, mode, status, totalTasks, finishedTasks, starttime, endtime
 			FROM tasks
 			WHERE usrID=?
 			ORDER BY project, starttime DESC
@@ -89,7 +176,7 @@ func RunStatCommand(globalDB *GlobalDB, projectFilter string) error {
 		defer rows.Close()
 
 		// Output format: project module mode status statis stime etime
-		// statis format: totalTasks/pendingTasks
+		// statis format: finishedTasks/totalTasks (已完成数/总任务数)
 		fmt.Printf("%-15s %-20s %-10s %-10s %-15s %-12s %-12s\n",
 			"project", "module", "mode", "status", "statis", "stime", "etime")
 
@@ -97,10 +184,10 @@ func RunStatCommand(globalDB *GlobalDB, projectFilter string) error {
 		for rows.Next() {
 			var project, module, mode, starttime string
 			var status sql.NullString
-			var totalTasks, pendingTasks int
+			var totalTasks, finishedTasks int
 			var endtime sql.NullString
 
-			err := rows.Scan(&project, &module, &mode, &status, &totalTasks, &pendingTasks, &starttime, &endtime)
+			err := rows.Scan(&project, &module, &mode, &status, &totalTasks, &finishedTasks, &starttime, &endtime)
 			if err != nil {
 				log.Printf("Error scanning row: %v", err)
 				continue
@@ -112,8 +199,8 @@ func RunStatCommand(globalDB *GlobalDB, projectFilter string) error {
 				statusStr = status.String
 			}
 
-			// Format statis: totalTasks/pendingTasks
-			statisStr := fmt.Sprintf("%d/%d", totalTasks, pendingTasks)
+			// Format statis: finishedTasks/totalTasks (已完成数/总任务数)
+			statisStr := fmt.Sprintf("%d/%d", finishedTasks, totalTasks)
 
 			// Format starttime and endtime: MM-DD HH:MM
 			stimeStr := formatTimeShort(starttime)
@@ -163,7 +250,7 @@ func RunStatModule(config *Config, args []string) {
 		projectFilter = *opt_project
 	}
 
-	err = RunStatCommand(globalDB, projectFilter)
+	err = RunStatCommand(globalDB, projectFilter, config)
 	if err != nil {
 		log.Fatalf("Stat command failed: %v", err)
 	}

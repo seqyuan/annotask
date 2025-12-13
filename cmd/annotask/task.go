@@ -22,7 +22,7 @@ import (
 
 // Global DRMAA session manager
 var (
-	drmaaSession     drmaa.Session
+	drmaaSession      drmaa.Session
 	drmaaSessionMutex sync.Mutex
 	drmaaSessionInit  bool
 )
@@ -244,9 +244,8 @@ func SubmitQsubCommand(ctx context.Context, N int, pool *gpool.Pool, dbObj *MySq
 		return
 	}
 	subShellPath = absSubShellPath
-	
-	// Get directory and base name of subShellPath
-	subShellDir := filepath.Dir(subShellPath)
+
+	// Get base name of subShellPath
 	subShellBase := filepath.Base(subShellPath)
 
 	// Set job template properties
@@ -273,10 +272,10 @@ func SubmitQsubCommand(ctx context.Context, N int, pool *gpool.Pool, dbObj *MySq
 	// Two parallel environment modes:
 	// - pe_smp mode (default): -pe smp Y -cwd -b n (Y=cpu)
 	// - num_proc mode: -l p=Y -cwd -b n (p=cpu)
-	
+
 	// Build resource specification
 	var resourceSpecs []string
-	
+
 	// Add memory specifications if set
 	if userSetMem {
 		resourceSpecs = append(resourceSpecs, fmt.Sprintf("vf=%dG", mem))
@@ -284,10 +283,10 @@ func SubmitQsubCommand(ctx context.Context, N int, pool *gpool.Pool, dbObj *MySq
 	if userSetHvmem {
 		resourceSpecs = append(resourceSpecs, fmt.Sprintf("h_vmem=%dG", h_vmem))
 	}
-	
+
 	// Build nativeSpec
 	var nativeSpecParts []string
-	
+
 	// Add parallel environment or CPU specification based on mode
 	if parallelEnvMode == string(ParallelEnvPeSmp) {
 		// pe_smp mode: use -pe smp (default, matches goqsub)
@@ -296,17 +295,17 @@ func SubmitQsubCommand(ctx context.Context, N int, pool *gpool.Pool, dbObj *MySq
 		// num_proc mode: add p=cpu to -l specification
 		resourceSpecs = append(resourceSpecs, fmt.Sprintf("p=%d", cpu))
 	}
-	
+
 	// Add -cwd to use current working directory (where qsub was executed) as job's working directory
 	// -cwd is a boolean flag in SGE and does not accept a path argument
 	// -b n means non-binary mode (use shell)
 	nativeSpecParts = append(nativeSpecParts, "-cwd", "-b n")
-	
+
 	// Add resource specifications if any
 	if len(resourceSpecs) > 0 {
 		nativeSpecParts = append(nativeSpecParts, fmt.Sprintf("-l %s", strings.Join(resourceSpecs, ",")))
 	}
-	
+
 	// Add queue specification if provided (supports multiple queues, comma-separated)
 	if queue != "" {
 		// Trim any trailing commas or whitespace from queue string
@@ -315,17 +314,14 @@ func SubmitQsubCommand(ctx context.Context, N int, pool *gpool.Pool, dbObj *MySq
 			nativeSpecParts = append(nativeSpecParts, fmt.Sprintf("-q %s", queue))
 		}
 	}
-	
+
 	// Add SGE project specification if provided (for resource quota management)
 	if sgeProject != "" {
 		nativeSpecParts = append(nativeSpecParts, fmt.Sprintf("-P %s", sgeProject))
 	}
-	
+
 	nativeSpec := strings.Join(nativeSpecParts, " ")
 	jt.SetNativeSpecification(nativeSpec)
-	
-	// Debug: log nativeSpec for troubleshooting
-	log.Printf("DEBUG: Task %d - nativeSpec: %s, subShellPath: %s, subShellDir: %s", N, nativeSpec, subShellPath, subShellDir)
 
 	// Submit job
 	jobID, err := session.RunJob(&jt)
