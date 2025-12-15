@@ -27,7 +27,7 @@ func runLocalMode(config *Config, args []string) {
 	parser := argparse.NewParser("annotask local", "Run tasks locally")
 	opt_i := parser.String("i", "infile", &argparse.Options{Required: true, Help: "Input shell command file (one command per line or grouped by -l)"})
 	opt_l := parser.Int("l", "line", &argparse.Options{Default: config.Defaults.Line, Help: fmt.Sprintf("Number of lines to group as one task (default: %d)", config.Defaults.Line)})
-	opt_p := parser.Int("p", "thread", &argparse.Options{Default: config.Defaults.Thread, Help: fmt.Sprintf("Max concurrent tasks to run (default: %d)", config.Defaults.Thread)})
+	opt_t := parser.Int("t", "thread", &argparse.Options{Default: 10, Help: "Max concurrent tasks to run (default: 10)"})
 	opt_project := parser.String("", "project", &argparse.Options{Default: config.Project, Help: fmt.Sprintf("Project name (default: %s)", config.Project)})
 
 	// Prepend program name for argparse.Parse (it expects os.Args-like format)
@@ -49,7 +49,7 @@ func runLocalMode(config *Config, args []string) {
 	mem := 1
 	h_vmem := 1
 	// Local mode doesn't use DRMAA, so mem/h_vmem/queue/sge-project/mode flags are not relevant
-	runTasks(config, *opt_i, *opt_l, *opt_p, *opt_project, ModeLocal, config.Defaults.CPU, mem, h_vmem, false, false, "", "", "pe_smp")
+	runTasks(config, *opt_i, *opt_l, *opt_t, *opt_project, ModeLocal, config.Defaults.CPU, mem, h_vmem, false, false, "", "", "pe_smp")
 }
 
 // runTasks is the common function to run tasks in both modes
@@ -69,14 +69,14 @@ func runTasks(config *Config, infile string, line, thread int, project string, m
 	startTime := time.Now()
 
 	dbObj := Creat_tb(infile, line, mode)
-	
+
 	// Check .sign files and update task status before starting
 	// Tasks with .sign files are marked as finished, others are marked as pending
 	err = CheckSignFilesAndUpdateStatus(dbObj)
 	if err != nil {
 		log.Printf("Warning: Failed to check sign files: %v", err)
 	}
-	
+
 	need2run := GetNeed2Run(dbObj)
 	fmt.Println(need2run)
 
@@ -100,13 +100,13 @@ func runTasks(config *Config, infile string, line, thread int, project string, m
 		if err != nil {
 			log.Fatalf("Failed to get current working directory: %v", err)
 		}
-		
+
 		// Switch to script directory before submitting jobs
 		err = os.Chdir(scriptDir)
 		if err != nil {
 			log.Fatalf("Failed to change to script directory %s: %v", scriptDir, err)
 		}
-		
+
 		// Restore original directory after all jobs are submitted
 		defer func() {
 			if restoreErr := os.Chdir(originalDir); restoreErr != nil {

@@ -27,7 +27,7 @@ func runQsubSgeMode(config *Config, args []string) {
 	parser := argparse.NewParser("annotask qsubsge", "Submit tasks to qsub SGE system")
 	opt_i := parser.String("i", "infile", &argparse.Options{Required: true, Help: "Input shell command file (one command per line or grouped by -l)"})
 	opt_l := parser.Int("l", "line", &argparse.Options{Default: config.Defaults.Line, Help: fmt.Sprintf("Number of lines to group as one task (default: %d)", config.Defaults.Line)})
-	opt_p := parser.Int("p", "thread", &argparse.Options{Default: config.Defaults.Thread, Help: fmt.Sprintf("Max concurrent tasks to run (default: %d)", config.Defaults.Thread)})
+	opt_t := parser.Int("t", "thread", &argparse.Options{Default: 10, Help: "Max concurrent tasks to run (default: 10)"})
 	opt_project := parser.String("", "project", &argparse.Options{Default: config.Project, Help: fmt.Sprintf("Project name (default: %s)", config.Project)})
 	opt_cpu := parser.Int("", "cpu", &argparse.Options{Default: config.Defaults.CPU, Help: fmt.Sprintf("Number of CPUs per task (default: %d)", config.Defaults.CPU)})
 	opt_mem := parser.Int("", "mem", &argparse.Options{Required: false, Help: "Virtual memory (vf) in GB per task (maps to -l vf=XG, only used if explicitly set)"})
@@ -101,7 +101,7 @@ func runQsubSgeMode(config *Config, args []string) {
 		log.Fatalf("Invalid --mode value: %s. Must be 'pe_smp' or 'num_proc'", mode)
 	}
 
-	runTasks(config, *opt_i, *opt_l, *opt_p, *opt_project, ModeQsubSge, *opt_cpu, mem, h_vmem, userSetMem, userSetHvmem, queue, sgeProject, mode)
+	runTasks(config, *opt_i, *opt_l, *opt_t, *opt_project, ModeQsubSge, *opt_cpu, mem, h_vmem, userSetMem, userSetHvmem, queue, sgeProject, mode)
 	
 	// Close DRMAA session when qsubsge mode completes
 	closeDRMAASession()

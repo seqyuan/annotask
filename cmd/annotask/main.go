@@ -37,7 +37,7 @@ func printModuleHelp(module string, config *Config) {
 		fmt.Println("    -h, --help        Print help information")
 		fmt.Println("    -i, --infile      Input shell command file (one command per line or grouped by -l) (required)")
 		fmt.Println("    -l, --line        Number of lines to group as one task (default: 1)")
-		fmt.Println("    -p, --thread      Max concurrent tasks to run (default: 1)")
+		fmt.Println("    -t, --thread      Max concurrent tasks to run (default: 10)")
 		fmt.Println("    --project         Project name (default: default)")
 	case "qsubsge":
 		fmt.Println("annotask qsubsge - Submit tasks to qsub SGE system")
@@ -49,7 +49,7 @@ func printModuleHelp(module string, config *Config) {
 		fmt.Println("    -h, --help        Print help information")
 		fmt.Println("    -i, --infile      Input shell command file (required)")
 		fmt.Println("    -l, --line        Number of lines to group as one task (default: 1)")
-		fmt.Println("    -p, --thread      Max concurrent tasks to run (default: 1)")
+		fmt.Println("    -t, --thread      Max concurrent tasks to run (default: 10)")
 		fmt.Println("    --project         Project name (default: default)")
 		fmt.Println("    --cpu             Number of CPUs per task (default: 1)")
 		fmt.Println("    --mem             Virtual memory (vf) in GB per task (only used if explicitly set)")

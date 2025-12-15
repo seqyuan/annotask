@@ -30,7 +30,7 @@ node:
 # Default parameter values
 defaults:
   line: 1      # Default number of lines to group as one task
-  thread: 1    # Default max concurrent tasks
+  thread: 10   # Default max concurrent tasks (note: command line default is 10, this is for reference only)
   cpu: 1       # Default CPU count (for qsubsge mode)
   # Note: mem and h_vmem are not configured here. They must be explicitly set
   # via --mem and --h_vmem flags if needed for qsubsge mode

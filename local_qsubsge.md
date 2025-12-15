@@ -12,13 +12,13 @@
 ### 基本用法
 
 ```bash
-annotask -i input.sh -l 2 -p 4 --project myproject
+annotask -i input.sh -l 2 -t 4 --project myproject
 ```
 
 或者显式指定模式：
 
 ```bash
-annotask local -i input.sh -l 2 -p 4 --project myproject
+annotask local -i input.sh -l 2 -t 4 --project myproject
 ```
 
 ### 参数说明
@@ -26,14 +26,14 @@ annotask local -i input.sh -l 2 -p 4 --project myproject
 ```
 -i, --infile    输入文件，shell脚本（必需）
 -l, --line      每几行作为一个任务单元（默认：1）
--p, --thread    最大并发任务数（默认：1）
+-t, --thread    最大并发任务数（默认：10）
     --project   项目名称（默认：从用户配置或系统配置读取）
 ```
 
 ### 使用示例
 
 ```bash
-annotask -i input.sh -l 2 -p 2 --project test
+annotask -i input.sh -l 2 -t 2 --project test
 ```
 
 **标准错误流的输出**：
@@ -91,13 +91,13 @@ Err Shells:
 
 ```bash
 # 只设置 mem，DRMAA 投递时只使用 -l vf=XG（虚拟内存）
-annotask qsubsge -i input.sh -l 2 -p 4 --project myproject --cpu 2 --mem 4
+annotask qsubsge -i input.sh -l 2 -t 4 --project myproject --cpu 2 --mem 4
 
 # 只设置 h_vmem，DRMAA 投递时只使用 -l h_vmem=XG（硬虚拟内存限制）
-annotask qsubsge -i input.sh -l 2 -p 4 --project myproject --cpu 2 --h_vmem 8
+annotask qsubsge -i input.sh -l 2 -t 4 --project myproject --cpu 2 --h_vmem 8
 
 # 同时设置 mem 和 h_vmem
-annotask qsubsge -i input.sh -l 2 -p 4 --project myproject --cpu 2 --mem 4 --h_vmem 8
+annotask qsubsge -i input.sh -l 2 -t 4 --project myproject --cpu 2 --mem 4 --h_vmem 8
 
 # 指定队列（单个或多个，逗号分隔）
 annotask qsubsge -i input.sh --queue sci.q
@@ -120,7 +120,7 @@ annotask qsubsge -i input.sh --cpu 4 --h_vmem 18 --mode num_proc
 ```
 -i, --infile    输入文件，shell脚本格式（必需）
 -l, --line      每几行作为一个任务单元（默认：从用户配置或系统配置读取）
--p, --thread    最大并发任务数（默认：从用户配置或系统配置读取）
+-t, --thread    最大并发任务数（默认：10）
     --project   项目名称（默认：从用户配置或系统配置读取）
     --cpu       CPU数量（默认：从用户配置或系统配置读取）
     --mem       虚拟内存（vf）大小（GB，映射到 -l vf=XG，仅在显式设置时在DRMAA中使用）
@@ -179,9 +179,9 @@ python3 /seqyuan/bin/blast_xml2txt.py -i sample4_1.xml -o sample4_1.txt
 
 依照上面的示例，一共有8行命令，如果设置 `-l 2`，则每2行作为1个单位并行的执行。
 
-### -p 参数说明
+### -t 参数说明
 
-如果要对整个annotask程序所在进程的资源做限制，可设置`-p`参数，指定最多同时并行多少个子进程。
+如果要对整个annotask程序所在进程的资源做限制，可设置`-t`参数，指定最多同时并行多少个子进程。如果不设置，默认值为 10。
 
 ### annotask产生的文件
 
@@ -254,7 +254,7 @@ tail -n 100 input.sh.log
 ## 其他使用方式
 
 ```bash
-annotask -i input.sh -l 2 -p 2 --project test
+annotask -i input.sh -l 2 -t 2 --project test
 ```
 
 我们可以把以上命令写入到`work.sh`里，然后把`work.sh`投递到SGE或者K8s计算节点。

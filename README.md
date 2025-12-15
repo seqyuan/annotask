@@ -28,7 +28,7 @@
 - **断点续传**：基于 SQLite 数据库记录任务状态，支持中断后继续执行
   - 已成功完成的任务会被自动跳过，只执行失败或未执行的任务
   - 每个任务独立执行，互不影响，失败任务不会阻塞其他任务
-- **并发控制**：可指定最大并发任务数（`-p` 参数），灵活控制资源使用
+- **并发控制**：可指定最大并发任务数（`-t` 参数，默认：10），灵活控制资源使用
 
 ### 🔄 自动重试机制
 - **智能重试**：失败任务最多自动重试 3 次（可在配置文件中自定义）
@@ -89,8 +89,8 @@
 1. **安装程序**：详见 [INSTALL.md](INSTALL.md)
 2. **配置环境**：配置用户级或系统级配置文件，详见 [INSTALL.md](INSTALL.md)
 3. **运行任务**：
-   - 本地模式：`annotask -i input.sh -l 2 -p 4 --project myproject`
-   - 集群模式：`annotask qsubsge -i input.sh -l 2 -p 4 --project myproject --cpu 2 --h_vmem 8`
+   - 本地模式：`annotask -i input.sh -l 2 -t 4 --project myproject`
+   - 集群模式：`annotask qsubsge -i input.sh -l 2 -t 4 --project myproject --cpu 2 --h_vmem 8`
 4. **查看状态**：`annotask stat` 或 `annotask stat -p myproject`
 5. **管理任务**：`annotask delete -p myproject` 或 `annotask delete -p myproject -m module`
 

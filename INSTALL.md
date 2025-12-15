@@ -11,7 +11,7 @@ export CGO_LDFLAGS="-L/opt/gridengine/lib/lx-amd64 -ldrmaa -Wl,-rpath,/opt/gride
 export LD_LIBRARY_PATH=/opt/gridengine/lib/lx-amd64:$LD_LIBRARY_PATH
 
 # 安装（从 GitHub 下载并编译指定版本）
-# CGO_ENABLED=1 go install github.com/seqyuan/annotask/cmd/annotask@v1.8.10
+# CGO_ENABLED=1 go install github.com/seqyuan/annotask/cmd/annotask@v1.8.11
 CGO_ENABLED=1 go install github.com/seqyuan/annotask/cmd/annotask@latest
 ```
 
@@ -122,7 +122,7 @@ node:
 # Default parameter values
 defaults:
   line: 1      # Default number of lines to group as one task
-  thread: 1    # Default max concurrent tasks
+  thread: 10   # Default max concurrent tasks (note: command line default is 10, this is for reference only)
   cpu: 1       # Default CPU count (for qsubsge mode)
   # Note: mem and h_vmem are not configured here. They must be explicitly set
   # via --mem and --h_vmem flags if needed for qsubsge mode
@@ -164,7 +164,7 @@ monitor_update_interval: 60
 
 - `defaults`: 各参数的默认值
   - `line`: 默认行分组数，默认为 1
-  - `thread`: 默认并发线程数，默认为 1
+  - `thread`: 默认并发线程数（注意：命令行参数 `-t/--thread` 的默认值为 10，此配置项仅供参考）
   - `cpu`: 默认 CPU 数量（qsubsge 模式），默认为 1
   - 注意：`mem` 和 `h_vmem` 不在配置文件中设置，必须通过命令行参数 `--mem` 和 `--h_vmem` 显式指定
 
