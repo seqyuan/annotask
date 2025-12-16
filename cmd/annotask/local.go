@@ -48,12 +48,14 @@ func runLocalMode(config *Config, args []string) {
 	// Use placeholder values (won't be used in local mode)
 	mem := 1.0
 	h_vmem := 1.0
-	// Local mode doesn't use DRMAA, so mem/h_vmem/queue/sge-project/mode flags are not relevant
-	runTasks(config, *opt_i, *opt_l, *opt_t, *opt_project, ModeLocal, config.Defaults.CPU, mem, h_vmem, false, false, "", "", "pe_smp")
+	// Local mode doesn't use DRMAA, so mem/h_vmem/queue/sge-project/mode/hostname flags are not relevant
+	// Build command string from original args
+	command := "annotask local " + strings.Join(args, " ")
+	runTasks(config, *opt_i, *opt_l, *opt_t, *opt_project, ModeLocal, config.Defaults.CPU, mem, h_vmem, false, false, "", "", "pe_smp", command, "")
 }
 
 // runTasks is the common function to run tasks in both modes
-func runTasks(config *Config, infile string, line, thread int, project string, mode JobMode, cpu int, mem, h_vmem float64, userSetMem, userSetHvmem bool, queue string, sgeProject string, parallelEnvMode string) {
+func runTasks(config *Config, infile string, line, thread int, project string, mode JobMode, cpu int, mem, h_vmem float64, userSetMem, userSetHvmem bool, queue string, sgeProject string, parallelEnvMode string, command string, hostname string) {
 
 	// Initialize global DB
 	globalDB, err := InitGlobalDB(config.Db)
@@ -94,7 +96,7 @@ func runTasks(config *Config, infile string, line, thread int, project string, m
 	ctx, cancel := context.WithCancel(context.Background())
 	var wg sync.WaitGroup
 	wg.Add(1)
-	go MonitorTaskStatus(ctx, dbObj, globalDB, usrID, project, module, string(mode), shellAbsPath, startTime, config, &wg)
+	go MonitorTaskStatus(ctx, dbObj, globalDB, usrID, project, module, string(mode), shellAbsPath, startTime, config, &wg, command)
 
 	// Create write_pool at runTasks level to ensure it outlives all goroutines
 	// This prevents WaitGroup reuse issues when monitoring loops continue after IlterCommand returns
@@ -129,7 +131,7 @@ func runTasks(config *Config, infile string, line, thread int, project string, m
 	if mode == ModeQsubSge {
 		maxRetries := config.Retry.Max
 		for retryCount := 0; retryCount < maxRetries; retryCount++ {
-			IlterCommand(ctx, dbObj, thread, need2run, mode, cpu, mem, h_vmem, userSetMem, userSetHvmem, queue, sgeProject, parallelEnvMode, write_pool)
+			IlterCommand(ctx, dbObj, thread, need2run, mode, cpu, mem, h_vmem, userSetMem, userSetHvmem, queue, sgeProject, parallelEnvMode, write_pool, hostname)
 			need2run = GetNeed2Run(dbObj)
 			if len(need2run) == 0 {
 				break
@@ -137,8 +139,8 @@ func runTasks(config *Config, infile string, line, thread int, project string, m
 			time.Sleep(2 * time.Second)
 		}
 	} else {
-		// Local mode: run once without retry
-		IlterCommand(ctx, dbObj, thread, need2run, mode, cpu, mem, h_vmem, userSetMem, userSetHvmem, queue, sgeProject, parallelEnvMode, write_pool)
+		// Local mode: run once without retry (hostname is not used in local mode)
+		IlterCommand(ctx, dbObj, thread, need2run, mode, cpu, mem, h_vmem, userSetMem, userSetHvmem, queue, sgeProject, parallelEnvMode, write_pool, "")
 	}
 
 	// Wait for all database write operations to complete

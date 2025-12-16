@@ -87,6 +87,7 @@ func runQsubSgeMode(config *Config, args []string) {
 	}
 	opt_sge_project := parser.String("P", "sge-project", &argparse.Options{Default: config.SgeProject, Help: sgeProjectHelp})
 	opt_mode := parser.String("", "mode", &argparse.Options{Default: "pe_smp", Help: "Parallel environment mode: pe_smp (use -pe smp X, default) or num_proc (use -l p=X)"})
+	opt_hostname := parser.String("", "hostname", &argparse.Options{Required: false, Help: "Specify hostname(s) for job execution. Supports single hostname or comma-separated list (e.g., node1 or node1,node2). Maps to -l h=hostname in SGE"})
 
 	// Check if user explicitly set --mem or --h_vmem before parsing
 	userSetMem := false
@@ -178,7 +179,19 @@ func runQsubSgeMode(config *Config, args []string) {
 		log.Fatalf("Invalid --mode value: %s. Must be 'pe_smp' or 'num_proc'", mode)
 	}
 
-	runTasks(config, *opt_i, *opt_l, *opt_t, *opt_project, ModeQsubSge, *opt_cpu, mem, h_vmem, userSetMem, userSetHvmem, queue, sgeProject, mode)
+	// Get hostname value
+	// Normalize: trim whitespace and check for "none" (case-insensitive)
+	hostname := ""
+	if opt_hostname != nil && *opt_hostname != "" {
+		hostnameValue := strings.TrimSpace(*opt_hostname)
+		if strings.ToLower(hostnameValue) != "none" && hostnameValue != "" {
+			hostname = hostnameValue
+		}
+	}
+
+	// Build command string from original args
+	command := "annotask qsubsge " + strings.Join(args, " ")
+	runTasks(config, *opt_i, *opt_l, *opt_t, *opt_project, ModeQsubSge, *opt_cpu, mem, h_vmem, userSetMem, userSetHvmem, queue, sgeProject, mode, command, hostname)
 
 	// Close DRMAA session when qsubsge mode completes
 	closeDRMAASession()

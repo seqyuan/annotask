@@ -239,9 +239,11 @@ func CheckSignFilesAndUpdateStatus(dbObj *MySql) error {
 			// .sign file doesn't exist, task should be pending
 			// Update to pending regardless of current status (because .sign file is the source of truth)
 			if currentStatus != string(J_pending) {
+				// Reset retry to 1 when re-running tasks (for both local and qsubsge modes)
+				// This ensures that when re-running failed tasks, retry starts from 1
 				_, err = tx.Exec(`
 					UPDATE job 
-					SET status=?, endtime=NULL, exitCode=NULL, taskid=NULL 
+					SET status=?, endtime=NULL, exitCode=NULL, taskid=NULL, retry=1 
 					WHERE subJob_num=?
 				`, J_pending, subJobNum)
 				if err != nil {
@@ -384,11 +386,11 @@ func UpdateGlobalTaskStatus(globalDB *GlobalDB, usrID, project, module string, s
 // For local mode, returns current hostname
 // For qsubsge mode, returns current hostname (the node where annotask qsubsge is executed)
 func GetNodeName(mode string, config *Config, dbObj *MySql) string {
-	hostname, err := os.Hostname()
-	if err != nil {
-		log.Printf("Warning: Could not get hostname: %v", err)
-		return "unknown"
-	}
+		hostname, err := os.Hostname()
+		if err != nil {
+			log.Printf("Warning: Could not get hostname: %v", err)
+			return "unknown"
+		}
 
 	if mode == "local" {
 		return hostname

@@ -78,7 +78,7 @@ Err Shells:
 
 **文件说明**：
 - `input.sh.db`：本地任务数据库（SQLite）
-- `input.sh.log`：实时监控日志文件
+- `input.sh.log`：实时监控日志文件（文件开头会记录执行的命令）
 - `input.sh.shell/`：子脚本存放目录
 - `task_XXXX.sh`：子脚本文件
 - `task_XXXX.sh.o`：标准输出文件
@@ -106,6 +106,12 @@ annotask qsubsge -i input.sh --queue trans.q,nassci.q,sci.q
 # 指定 SGE 项目（用于资源配额管理）
 annotask qsubsge -i input.sh -P bioinformatics
 
+# 指定节点（单个节点）
+annotask qsubsge -i input.sh --hostname node1
+
+# 指定节点（多个节点，任选其一）
+annotask qsubsge -i input.sh --hostname node1,node2,node3
+
 # 使用 -pe smp 并行环境模式（默认）
 annotask qsubsge -i input.sh --cpu 4 --h_vmem 5
 # 或显式指定
@@ -127,6 +133,7 @@ annotask qsubsge -i input.sh --cpu 4 --h_vmem 18 --mode num_proc
     --h_vmem    硬虚拟内存限制（h_vmem）大小（GB，映射到 -l h_vmem=XG，仅在显式设置时在DRMAA中使用）
     --queue     队列名称（多个队列用逗号分隔，默认：从用户配置或系统配置读取）
     -P, --sge-project  SGE项目名称（用于资源配额管理，默认：从用户配置或系统配置读取）
+    --hostname  指定节点（单个节点或逗号分隔的多个节点，映射到 -l h=hostname，仅 qsubsge 模式）
     --mode      并行环境模式：pe_smp（使用 -pe smp X，默认）或 num_proc（使用 -l p=X）
 ```
 
@@ -138,7 +145,8 @@ annotask qsubsge -i input.sh --cpu 4 --h_vmem 18 --mode num_proc
 - 如果只设置了 `--h_vmem`，DRMAA 投递时只包含 `-l h_vmem=XG`，不包含 `-l vf`
 - 如果都不设置，DRMAA 投递时不会包含内存相关参数
 - `--queue` 支持多个队列，用逗号分隔（例如：`trans.q,nassci.q,sci.q`）
-- `-P/--sge-project` 用于 SGE 资源配额管理，如果未设置则不在 DRMAA 中使用 `-P` 参数
+- `-P/--sge-project` 用于 SGE 资源配额管理，如果未设置或设置为 "none"（大小写不敏感），则不在 DRMAA 中使用 `-P` 参数
+- `--hostname` 用于指定任务运行的节点，支持单个节点或逗号分隔的多个节点（例如：`node1` 或 `node1,node2`），DRMAA 投递时使用 `-l h=hostname`。如果设置为 "none"（大小写不敏感）或空，则不会添加节点限制。**注意：此参数仅对 qsubsge 模式有效，local 模式不支持**
 
 **并行环境模式**：
 - **pe_smp 模式**（默认，`--mode pe_smp`）：使用 `-pe smp X` 指定 CPU 数量
@@ -195,6 +203,19 @@ python3 /seqyuan/bin/blast_xml2txt.py -i sample4_1.xml -o sample4_1.txt
 
 annotask在运行时会启动一个独立的goroutine实时监控任务状态，并将状态变化以表格格式输出到日志文件。日志文件位置为 `{输入文件路径}.log`（例如：`input.sh.log`）。
 
+### 日志文件格式
+
+日志文件开头会记录执行的命令，格式如下：
+
+```
+annotask qsubsge -i input.sh --cpu 4 --h_vmem 5 --hostname node1
+
+try    task   status     taskid     exitcode time        
+1:3    0001   Running    3652318    -        12-09 10:24 
+```
+
+如果多次运行同一个任务，每次运行会在日志文件末尾追加新的命令和监控信息（前面会有一个空行分隔）。
+
 ### 监控输出格式
 
 监控输出采用表格格式，包含以下列：
@@ -238,6 +259,13 @@ tail -n 100 input.sh.log
 - 失败的任务会自动重试，最多重试3次（可在配置文件中修改）
 - 重试次数记录在数据库的`retry`列中
 - 只有 qsubsge 模式支持自动重试，local 模式不支持自动重试
+
+### 重新运行时的 retry 重置
+
+当第一次运行部分任务失败后，第二次重新运行 `annotask local` 或 `annotask qsubsge` 时：
+- 失败任务的 `retry` 值会被重置为 1
+- 这样可以确保重新运行的任务从第一轮重试开始，而不是继续之前的重试计数
+- 适用于 local 和 qsubsge 两种模式
 
 ### 内存自适应重试
 

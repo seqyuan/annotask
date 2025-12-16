@@ -66,13 +66,13 @@ func formatMemoryGB(mem float64) string {
 	return fmt.Sprintf("%.2fG", mem)
 }
 
-func IlterCommand(ctx context.Context, dbObj *MySql, thred int, need2run []int, mode JobMode, cpu int, mem, h_vmem float64, userSetMem, userSetHvmem bool, queue string, sgeProject string, parallelEnvMode string, write_pool *gpool.Pool) {
+func IlterCommand(ctx context.Context, dbObj *MySql, thred int, need2run []int, mode JobMode, cpu int, mem, h_vmem float64, userSetMem, userSetHvmem bool, queue string, sgeProject string, parallelEnvMode string, write_pool *gpool.Pool, hostname string) {
 	pool := gpool.New(thred)
 
 	for _, N := range need2run {
 		pool.Add(1)
 		if mode == ModeQsubSge {
-			go SubmitQsubCommand(ctx, N, pool, dbObj, write_pool, cpu, mem, h_vmem, userSetMem, userSetHvmem, queue, sgeProject, parallelEnvMode)
+			go SubmitQsubCommand(ctx, N, pool, dbObj, write_pool, cpu, mem, h_vmem, userSetMem, userSetHvmem, queue, sgeProject, parallelEnvMode, hostname)
 		} else {
 			go RunCommand(N, pool, dbObj, write_pool)
 		}
@@ -163,7 +163,7 @@ func RunCommand(N int, pool *gpool.Pool, dbObj *MySql, write_pool *gpool.Pool) {
 	CheckErr(err)
 }
 
-func SubmitQsubCommand(ctx context.Context, N int, pool *gpool.Pool, dbObj *MySql, write_pool *gpool.Pool, cpu int, mem, h_vmem float64, userSetMem, userSetHvmem bool, queue string, sgeProject string, parallelEnvMode string) {
+func SubmitQsubCommand(ctx context.Context, N int, pool *gpool.Pool, dbObj *MySql, write_pool *gpool.Pool, cpu int, mem, h_vmem float64, userSetMem, userSetHvmem bool, queue string, sgeProject string, parallelEnvMode string, hostname string) {
 	defer pool.Done()
 
 	var subShellPath string
@@ -295,6 +295,13 @@ func SubmitQsubCommand(ctx context.Context, N int, pool *gpool.Pool, dbObj *MySq
 		resourceSpecs = append(resourceSpecs, fmt.Sprintf("h_vmem=%s", formatMemoryGB(h_vmem)))
 	}
 
+	// Add hostname specification if provided (non-empty and not "none")
+	// Supports single hostname or comma-separated list (e.g., node1 or node1,node2)
+	if hostname != "" && strings.ToLower(strings.TrimSpace(hostname)) != "none" {
+		hostnameValue := strings.TrimSpace(hostname)
+		resourceSpecs = append(resourceSpecs, fmt.Sprintf("h=%s", hostnameValue))
+	}
+
 	// Build nativeSpec
 	var nativeSpecParts []string
 
@@ -319,8 +326,13 @@ func SubmitQsubCommand(ctx context.Context, N int, pool *gpool.Pool, dbObj *MySq
 
 	// Add queue specification if provided (supports multiple queues, comma-separated)
 	if queue != "" {
-		// Trim any trailing commas or whitespace from queue string
-		queue = strings.TrimRight(strings.TrimSpace(queue), ", \t")
+		// Trim whitespace from queue string, but preserve internal structure
+		// Only trim leading/trailing whitespace, not commas (commas are valid separators)
+		queue = strings.TrimSpace(queue)
+		// Only remove trailing commas (if user accidentally added them)
+		queue = strings.TrimRight(queue, ",")
+		// Trim any remaining whitespace after removing trailing commas
+		queue = strings.TrimSpace(queue)
 		if queue != "" {
 			nativeSpecParts = append(nativeSpecParts, fmt.Sprintf("-q %s", queue))
 		}
@@ -347,7 +359,8 @@ func SubmitQsubCommand(ctx context.Context, N int, pool *gpool.Pool, dbObj *MySq
 			log.Printf("Error updating database: %v", dbErr)
 		}
 		if submitErr != nil {
-			log.Printf("Error submitting job: %v", submitErr)
+			// Log nativeSpec for debugging queue issues
+			log.Printf("Error submitting job: %v (nativeSpec: %s)", submitErr, nativeSpec)
 		} else {
 			log.Printf("Error submitting job: unknown error (err is nil)")
 		}

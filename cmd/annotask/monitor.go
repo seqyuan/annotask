@@ -11,11 +11,18 @@ import (
 )
 
 // MonitorTaskStatus monitors database and outputs task status changes to log file
-func MonitorTaskStatus(ctx context.Context, dbObj *MySql, globalDB *GlobalDB, usrID, project, module, mode, shellPath string, startTime time.Time, config *Config, wg *sync.WaitGroup) {
+func MonitorTaskStatus(ctx context.Context, dbObj *MySql, globalDB *GlobalDB, usrID, project, module, mode, shellPath string, startTime time.Time, config *Config, wg *sync.WaitGroup, command string) {
 	defer wg.Done()
 
 	// Open log file: shellPath.log (e.g., test.sh.log)
 	logFilePath := shellPath + ".log"
+	
+	// Check if file exists to determine if we should write command header
+	fileExists := false
+	if _, err := os.Stat(logFilePath); err == nil {
+		fileExists = true
+	}
+	
 	logFile, err := os.OpenFile(logFilePath, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0644)
 	if err != nil {
 		log.Printf("Error opening log file %s: %v", logFilePath, err)
@@ -25,6 +32,20 @@ func MonitorTaskStatus(ctx context.Context, dbObj *MySql, globalDB *GlobalDB, us
 
 	// Mutex to protect concurrent writes to log file
 	var logMutex sync.Mutex
+	
+	// Write command at the beginning if file is new (doesn't exist before)
+	// If file exists, append command with newline separator
+	if command != "" {
+		logMutex.Lock()
+		if fileExists {
+			// File exists, append newline before command
+			fmt.Fprintf(logFile, "\n")
+		}
+		fmt.Fprintf(logFile, "%s\n", command)
+		fmt.Fprintf(logFile, "\n")
+		logFile.Sync()
+		logMutex.Unlock()
+	}
 
 	// Map to track last known status for each task
 	lastStatus := make(map[int]TaskStatus)
