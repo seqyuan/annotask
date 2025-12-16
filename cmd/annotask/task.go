@@ -281,8 +281,8 @@ func SubmitQsubCommand(ctx context.Context, N int, pool *gpool.Pool, dbObj *MySq
 	// - --mem maps to -l vf=XG (virtual free memory)
 	// - --h_vmem maps to -l h_vmem=XG (hard virtual memory limit)
 	// Two parallel environment modes:
-	// - pe_smp mode (default): -pe smp Y -cwd -b n (Y=cpu)
-	// - num_proc mode: -l p=Y -cwd -b n (p=cpu)
+	// - pe_smp mode: -pe smp Y -cwd -b n (Y=cpu)
+	// - num_proc mode (default): -l p=Y -cwd -b n (p=cpu)
 
 	// Build resource specification
 	var resourceSpecs []string
@@ -307,7 +307,7 @@ func SubmitQsubCommand(ctx context.Context, N int, pool *gpool.Pool, dbObj *MySq
 
 	// Add parallel environment or CPU specification based on mode
 	if parallelEnvMode == string(ParallelEnvPeSmp) {
-		// pe_smp mode: use -pe smp (default, matches goqsub)
+		// pe_smp mode: use -pe smp (matches goqsub)
 		nativeSpecParts = append(nativeSpecParts, fmt.Sprintf("-pe smp %d", cpu))
 	} else {
 		// num_proc mode: add p=cpu to -l specification

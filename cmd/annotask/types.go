@@ -84,8 +84,8 @@ const (
 type ParallelEnvMode string
 
 const (
-	ParallelEnvPeSmp   ParallelEnvMode = "pe_smp"   // Use -pe smp X (default)
-	ParallelEnvNumProc ParallelEnvMode = "num_proc" // Use -l p=X
+	ParallelEnvPeSmp   ParallelEnvMode = "pe_smp"   // Use -pe smp X
+	ParallelEnvNumProc ParallelEnvMode = "num_proc" // Use -l p=X (default)
 )
 
 // jobStatusType represents the status of a job

@@ -15,7 +15,7 @@ go env -w GOPROXY=https://goproxy.cn,direct
 # go env -w GOPROXY=https://mirrors.tuna.tsinghua.edu.cn/goproxy/,direct
 
 # 安装（从 GitHub 下载并编译指定版本）
-# CGO_ENABLED=1 go install github.com/seqyuan/annotask/cmd/annotask@v1.9.4
+# CGO_ENABLED=1 go install github.com/seqyuan/annotask/cmd/annotask@v1.9.5
 CGO_ENABLED=1 go install github.com/seqyuan/annotask/cmd/annotask@latest
 ```
 

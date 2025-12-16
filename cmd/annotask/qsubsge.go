@@ -86,7 +86,7 @@ func runQsubSgeMode(config *Config, args []string) {
 		sgeProjectHelp = fmt.Sprintf("%s (default: from config, or empty if not set)", sgeProjectHelp)
 	}
 	opt_sge_project := parser.String("P", "sge-project", &argparse.Options{Default: config.SgeProject, Help: sgeProjectHelp})
-	opt_mode := parser.String("", "mode", &argparse.Options{Default: "pe_smp", Help: "Parallel environment mode: pe_smp (use -pe smp X, default) or num_proc (use -l p=X)"})
+	opt_mode := parser.String("", "mode", &argparse.Options{Default: "num_proc", Help: "Parallel environment mode: pe_smp (use -pe smp X) or num_proc (use -l p=X, default)"})
 	opt_hostname := parser.String("", "hostname", &argparse.Options{Required: false, Help: "Specify hostname(s) for job execution. Supports single hostname or comma-separated list (e.g., node1 or node1,node2). Maps to -l h=hostname in SGE"})
 
 	// Check if user explicitly set --mem or --h_vmem before parsing
@@ -169,7 +169,7 @@ func runQsubSgeMode(config *Config, args []string) {
 	}
 
 	// Get mode value and validate
-	mode := "pe_smp" // default
+	mode := "num_proc" // default
 	if opt_mode != nil && *opt_mode != "" {
 		mode = *opt_mode
 	}
