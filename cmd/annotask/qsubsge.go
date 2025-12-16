@@ -144,9 +144,17 @@ func runQsubSgeMode(config *Config, args []string) {
 
 	// Get SGE project value
 	// If user explicitly set -P/--sge-project, use it; otherwise use config.SgeProject
+	// Special handling: ignore "none", "None", or empty string values
 	sgeProject := config.SgeProject // Default from config (user home config takes precedence)
 	if opt_sge_project != nil && *opt_sge_project != "" {
-		sgeProject = *opt_sge_project // Command line argument takes highest precedence
+		// Normalize the value: trim whitespace and check for "none" (case-insensitive)
+		projectValue := strings.TrimSpace(*opt_sge_project)
+		if strings.ToLower(projectValue) != "none" && projectValue != "" {
+			sgeProject = projectValue // Command line argument takes highest precedence
+		} else {
+			// User explicitly set to "none" or empty, ignore it (don't use -P parameter)
+			sgeProject = ""
+		}
 	}
 
 	// Get mode value and validate
