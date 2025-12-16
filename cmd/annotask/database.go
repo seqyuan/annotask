@@ -382,19 +382,23 @@ func UpdateGlobalTaskStatus(globalDB *GlobalDB, usrID, project, module string, s
 
 // GetNodeName gets the node name based on mode
 // For local mode, returns current hostname
-// For qsubsge mode, returns "-" because tasks may run on multiple different nodes
+// For qsubsge mode, returns current hostname (the node where annotask qsubsge is executed)
 func GetNodeName(mode string, config *Config, dbObj *MySql) string {
+	hostname, err := os.Hostname()
+	if err != nil {
+		log.Printf("Warning: Could not get hostname: %v", err)
+		return "unknown"
+	}
+
 	if mode == "local" {
-		hostname, err := os.Hostname()
-		if err != nil {
-			log.Printf("Warning: Could not get hostname: %v", err)
-			return "unknown"
-		}
 		return hostname
 	} else if mode == "qsubsge" {
-		// For qsubsge mode, don't record node in global database
-		// because tasks may run on multiple different nodes
-		return "-"
+		// For qsubsge mode, record the node where annotask qsubsge is executed
+		// This is the submission node, not the execution node
+		// If config.Node is empty, record current node
+		// If config.Node is not empty, current node must be in the list (checked by CheckNode)
+		// so we record current node
+		return hostname
 	}
 	return "unknown"
 }

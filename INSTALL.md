@@ -10,8 +10,12 @@ export CGO_CFLAGS="-I/opt/gridengine/include"
 export CGO_LDFLAGS="-L/opt/gridengine/lib/lx-amd64 -ldrmaa -Wl,-rpath,/opt/gridengine/lib/lx-amd64"
 export LD_LIBRARY_PATH=/opt/gridengine/lib/lx-amd64:$LD_LIBRARY_PATH
 
+# 
+go env -w GOPROXY=https://goproxy.cn,direct
+# go env -w GOPROXY=https://mirrors.tuna.tsinghua.edu.cn/goproxy/,direct
+
 # 安装（从 GitHub 下载并编译指定版本）
-# CGO_ENABLED=1 go install github.com/seqyuan/annotask/cmd/annotask@v1.8.11
+# CGO_ENABLED=1 go install github.com/seqyuan/annotask/cmd/annotask@v1.9.0
 CGO_ENABLED=1 go install github.com/seqyuan/annotask/cmd/annotask@latest
 ```
 

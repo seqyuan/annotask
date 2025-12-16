@@ -85,12 +85,24 @@ func RunStatCommand(globalDB *GlobalDB, projectFilter string, config *Config) er
 				continue
 			}
 
-			// Get node name (for local mode, need to open db again or pass nil)
+			// Get node name
+			// For local mode: get current hostname
+			// For qsubsge mode: get from database (submission node)
 			node := "-"
 			if mode == "local" {
 				hostname, err := os.Hostname()
 				if err == nil {
 					node = hostname
+				}
+			} else if mode == "qsubsge" {
+				// For qsubsge mode, node is stored in database (submission node)
+				var nodeValue sql.NullString
+				err = globalDB.Db.QueryRow(`
+					SELECT node FROM tasks 
+					WHERE usrID=? AND project=? AND module=? AND starttime=?
+				`, usrID, project, module, starttime).Scan(&nodeValue)
+				if err == nil && nodeValue.Valid && nodeValue.String != "" {
+					node = nodeValue.String
 				}
 			}
 

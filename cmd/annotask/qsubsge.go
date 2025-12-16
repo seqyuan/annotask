@@ -4,10 +4,55 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/akamensky/argparse"
 )
+
+// parseMemoryString parses memory string and converts it to GB (float64)
+// Supports formats: "2", "2G", "2g", "200m", "200M"
+// Returns the value in GB as float64
+func parseMemoryString(s string) (float64, error) {
+	if s == "" {
+		return 0, fmt.Errorf("empty memory string")
+	}
+
+	// Remove all whitespace (including spaces between number and unit)
+	s = strings.ReplaceAll(strings.TrimSpace(s), " ", "")
+
+	// Regular expression to match number and optional unit
+	re := regexp.MustCompile(`^(\d+(?:\.\d+)?)([GgMm])?$`)
+	matches := re.FindStringSubmatch(s)
+	if matches == nil {
+		return 0, fmt.Errorf("invalid memory format: %s (expected format: number with optional G/g/M/m suffix, e.g., 2, 2G, 200m)", s)
+	}
+
+	// Parse the number
+	value, err := strconv.ParseFloat(matches[1], 64)
+	if err != nil {
+		return 0, fmt.Errorf("invalid number in memory string: %s", s)
+	}
+
+	// Get unit (if any)
+	unit := strings.ToUpper(matches[2])
+	if unit == "" {
+		// No unit specified, assume GB
+		return value, nil
+	}
+
+	// Convert to GB based on unit
+	switch unit {
+	case "G":
+		return value, nil
+	case "M":
+		// Convert MB to GB
+		return value / 1000.0, nil
+	default:
+		return 0, fmt.Errorf("unsupported memory unit: %s (supported: G, g, M, m)", unit)
+	}
+}
 
 // runQsubSgeMode runs tasks in qsubsge mode
 func runQsubSgeMode(config *Config, args []string) {
@@ -30,8 +75,8 @@ func runQsubSgeMode(config *Config, args []string) {
 	opt_t := parser.Int("t", "thread", &argparse.Options{Default: 10, Help: "Max concurrent tasks to run (default: 10)"})
 	opt_project := parser.String("", "project", &argparse.Options{Default: config.Project, Help: fmt.Sprintf("Project name (default: %s)", config.Project)})
 	opt_cpu := parser.Int("", "cpu", &argparse.Options{Default: config.Defaults.CPU, Help: fmt.Sprintf("Number of CPUs per task (default: %d)", config.Defaults.CPU)})
-	opt_mem := parser.Int("", "mem", &argparse.Options{Required: false, Help: "Virtual memory (vf) in GB per task (maps to -l vf=XG, only used if explicitly set)"})
-	opt_h_vmem := parser.Int("", "h_vmem", &argparse.Options{Required: false, Help: "Hard virtual memory limit (h_vmem) in GB per task (maps to -l h_vmem=XG, only used if explicitly set)"})
+	opt_mem := parser.String("", "mem", &argparse.Options{Required: false, Help: "Virtual memory (vf) per task (maps to -l vf=XG, only used if explicitly set). Supports formats: 2, 2G, 2g, 200m, 200M"})
+	opt_h_vmem := parser.String("", "h_vmem", &argparse.Options{Required: false, Help: "Hard virtual memory limit (h_vmem) per task (maps to -l h_vmem=XG, only used if explicitly set). Supports formats: 2, 2G, 2g, 200m, 200M"})
 	opt_queue := parser.String("", "queue", &argparse.Options{Default: config.Queue, Help: fmt.Sprintf("Queue name(s), comma-separated for multiple queues (default: %s)", config.Queue)})
 	// Format help message for sge-project
 	sgeProjectHelp := "SGE project name for resource quota management"
@@ -69,9 +114,23 @@ func runQsubSgeMode(config *Config, args []string) {
 		os.Exit(1)
 	}
 
-	// Get mem and h_vmem values
-	mem := *opt_mem
-	h_vmem := *opt_h_vmem
+	// Parse mem and h_vmem values
+	var mem float64
+	var h_vmem float64
+	var errMem, errHvmem error
+
+	if userSetMem && opt_mem != nil && *opt_mem != "" {
+		mem, errMem = parseMemoryString(*opt_mem)
+		if errMem != nil {
+			log.Fatalf("Error parsing --mem value: %v", errMem)
+		}
+	}
+	if userSetHvmem && opt_h_vmem != nil && *opt_h_vmem != "" {
+		h_vmem, errHvmem = parseMemoryString(*opt_h_vmem)
+		if errHvmem != nil {
+			log.Fatalf("Error parsing --h_vmem value: %v", errHvmem)
+		}
+	}
 
 	// Note: We don't auto-calculate h_vmem from mem anymore.
 	// Only use values that user explicitly set via --mem or --h_vmem flags.
@@ -95,14 +154,14 @@ func runQsubSgeMode(config *Config, args []string) {
 	if opt_mode != nil && *opt_mode != "" {
 		mode = *opt_mode
 	}
-	
+
 	// Validate mode value
 	if mode != "pe_smp" && mode != "num_proc" {
 		log.Fatalf("Invalid --mode value: %s. Must be 'pe_smp' or 'num_proc'", mode)
 	}
 
 	runTasks(config, *opt_i, *opt_l, *opt_t, *opt_project, ModeQsubSge, *opt_cpu, mem, h_vmem, userSetMem, userSetHvmem, queue, sgeProject, mode)
-	
+
 	// Close DRMAA session when qsubsge mode completes
 	closeDRMAASession()
 }

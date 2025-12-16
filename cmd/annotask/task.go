@@ -55,7 +55,18 @@ func closeDRMAASession() {
 	}
 }
 
-func IlterCommand(ctx context.Context, dbObj *MySql, thred int, need2run []int, mode JobMode, cpu, mem, h_vmem int, userSetMem, userSetHvmem bool, queue string, sgeProject string, parallelEnvMode string, write_pool *gpool.Pool) {
+// formatMemoryGB formats memory value in GB for SGE resource specification
+// If the value is an integer, uses %dG format; otherwise uses %.2fG format
+func formatMemoryGB(mem float64) string {
+	// Check if value is effectively an integer (within floating point precision)
+	if mem == math.Trunc(mem) {
+		return fmt.Sprintf("%dG", int(mem))
+	}
+	// Use 2 decimal places for fractional values
+	return fmt.Sprintf("%.2fG", mem)
+}
+
+func IlterCommand(ctx context.Context, dbObj *MySql, thred int, need2run []int, mode JobMode, cpu int, mem, h_vmem float64, userSetMem, userSetHvmem bool, queue string, sgeProject string, parallelEnvMode string, write_pool *gpool.Pool) {
 	pool := gpool.New(thred)
 
 	for _, N := range need2run {
@@ -152,13 +163,13 @@ func RunCommand(N int, pool *gpool.Pool, dbObj *MySql, write_pool *gpool.Pool) {
 	CheckErr(err)
 }
 
-func SubmitQsubCommand(ctx context.Context, N int, pool *gpool.Pool, dbObj *MySql, write_pool *gpool.Pool, cpu, mem, h_vmem int, userSetMem, userSetHvmem bool, queue string, sgeProject string, parallelEnvMode string) {
+func SubmitQsubCommand(ctx context.Context, N int, pool *gpool.Pool, dbObj *MySql, write_pool *gpool.Pool, cpu int, mem, h_vmem float64, userSetMem, userSetHvmem bool, queue string, sgeProject string, parallelEnvMode string) {
 	defer pool.Done()
 
 	var subShellPath string
 	var retry int
-	var currentMem int
-	var currentHvmem int
+	var currentMem float64
+	var currentHvmem float64
 	var taskid sql.NullString
 	err := dbObj.Db.QueryRow("select shellPath, retry, mem, h_vmem, taskid from job where subJob_num = ?", N).Scan(&subShellPath, &retry, &currentMem, &currentHvmem, &taskid)
 	CheckErr(err)
@@ -278,10 +289,10 @@ func SubmitQsubCommand(ctx context.Context, N int, pool *gpool.Pool, dbObj *MySq
 
 	// Add memory specifications if set
 	if userSetMem {
-		resourceSpecs = append(resourceSpecs, fmt.Sprintf("vf=%dG", mem))
+		resourceSpecs = append(resourceSpecs, fmt.Sprintf("vf=%s", formatMemoryGB(mem)))
 	}
 	if userSetHvmem {
-		resourceSpecs = append(resourceSpecs, fmt.Sprintf("h_vmem=%dG", h_vmem))
+		resourceSpecs = append(resourceSpecs, fmt.Sprintf("h_vmem=%s", formatMemoryGB(h_vmem)))
 	}
 
 	// Build nativeSpec
@@ -470,12 +481,13 @@ func SubmitQsubCommand(ctx context.Context, N int, pool *gpool.Pool, dbObj *MySq
 					// Increase memory by 125% only if user set the corresponding parameter
 					// Round up to ensure we have enough memory
 					if userSetMem {
-						newMem = int(math.Ceil(float64(mem) * 1.25))
+						newMem = math.Ceil(mem * 1.25)
 					}
 					if userSetHvmem {
-						newHvmem = int(math.Ceil(float64(h_vmem) * 1.25))
+						newHvmem = math.Ceil(h_vmem * 1.25)
 					}
 				}
+				// Store as float64 in database (database will handle conversion if needed)
 				_, err = dbObj.Db.Exec("UPDATE job set status=?, endtime=?, exitCode=?, retry=?, mem=?, h_vmem=?, node=? where subJob_num=?", J_failed, now, exitCode, retry, newMem, newHvmem, executionNode, N)
 			}
 			write_pool.Done()

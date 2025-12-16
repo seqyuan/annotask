@@ -46,14 +46,14 @@ func runLocalMode(config *Config, args []string) {
 
 	// For local mode, mem and h_vmem are not used, but we still need to pass values
 	// Use placeholder values (won't be used in local mode)
-	mem := 1
-	h_vmem := 1
+	mem := 1.0
+	h_vmem := 1.0
 	// Local mode doesn't use DRMAA, so mem/h_vmem/queue/sge-project/mode flags are not relevant
 	runTasks(config, *opt_i, *opt_l, *opt_t, *opt_project, ModeLocal, config.Defaults.CPU, mem, h_vmem, false, false, "", "", "pe_smp")
 }
 
 // runTasks is the common function to run tasks in both modes
-func runTasks(config *Config, infile string, line, thread int, project string, mode JobMode, cpu, mem, h_vmem int, userSetMem, userSetHvmem bool, queue string, sgeProject string, parallelEnvMode string) {
+func runTasks(config *Config, infile string, line, thread int, project string, mode JobMode, cpu int, mem, h_vmem float64, userSetMem, userSetHvmem bool, queue string, sgeProject string, parallelEnvMode string) {
 
 	// Initialize global DB
 	globalDB, err := InitGlobalDB(config.Db)
@@ -79,6 +79,16 @@ func runTasks(config *Config, infile string, line, thread int, project string, m
 
 	need2run := GetNeed2Run(dbObj)
 	fmt.Println(need2run)
+
+	// Immediately insert task record into global database
+	// This ensures the task appears in the database right away
+	total, pending, failed, running, finished, _ := GetTaskStats(dbObj)
+	node := GetNodeName(string(mode), config, dbObj)
+	pid := os.Getpid() // Get main process PID
+	err = UpdateGlobalTaskRecord(globalDB, usrID, project, module, string(mode), shellAbsPath, startTime, total, pending, failed, running, finished, node, pid)
+	if err != nil {
+		log.Printf("Warning: Failed to create initial task record in global DB: %v", err)
+	}
 
 	// Start task status monitor goroutine
 	ctx, cancel := context.WithCancel(context.Background())
@@ -141,9 +151,9 @@ func runTasks(config *Config, infile string, line, thread int, project string, m
 
 	// Final update to global DB
 	endTime := time.Now()
-	total, pending, failed, running, finished, _ := GetTaskStats(dbObj)
-	node := GetNodeName(string(mode), config, dbObj)
-	pid := os.Getpid() // Get main process PID
+	total, pending, failed, running, finished, _ = GetTaskStats(dbObj)
+	node = GetNodeName(string(mode), config, dbObj)
+	pid = os.Getpid() // Get main process PID
 	UpdateGlobalTaskRecord(globalDB, usrID, project, module, string(mode), shellAbsPath, startTime, total, pending, failed, running, finished, node, pid)
 	// Update endtime
 	startTimeStr := startTime.Format("2006-01-02 15:04:05")

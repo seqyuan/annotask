@@ -129,8 +129,12 @@ func MonitorTaskStatus(ctx context.Context, dbObj *MySql, globalDB *GlobalDB, us
 		}
 	}
 
-	// Perform initial update immediately
+	// Perform initial update immediately for log file
 	updateLogFile()
+
+	// Perform initial update for global database immediately
+	// (The record should already exist from runTasks, but we update it to ensure it's current)
+	updateGlobalDB()
 
 	for {
 		select {

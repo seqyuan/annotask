@@ -232,6 +232,7 @@ func GetCurrentUserID() string {
 
 // CheckNode checks if current node is in the allowed nodes list (for qsubsge mode)
 // If configNodes is empty, no restriction is applied
+// If configNodes is not empty, current node must be in the list, otherwise returns error
 func CheckNode(configNodes []string) error {
 	// If node list is empty, no restriction
 	if len(configNodes) == 0 {
@@ -250,5 +251,6 @@ func CheckNode(configNodes []string) error {
 		}
 	}
 
-	return fmt.Errorf("current node (%s) is not in allowed nodes list: %v", currentNode, configNodes)
+	// Current node is not in the allowed list
+	return fmt.Errorf("current node (%s) is not in allowed nodes list: %v. Please run annotask qsubsge on one of the allowed nodes", currentNode, configNodes)
 }

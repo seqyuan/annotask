@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,7 +15,18 @@ import (
 
 	"github.com/akamensky/argparse"
 	_ "github.com/mattn/go-sqlite3"
+	"golang.org/x/crypto/ssh"
 )
+
+// TaskInfo represents task information for deletion
+type TaskInfo struct {
+	pid       sql.NullInt64
+	mode      string
+	shellPath string
+	starttime string
+	status    string
+	node      sql.NullString
+}
 
 // RunDeleteCommand runs the delete subcommand
 func RunDeleteCommand(globalDB *GlobalDB, project, module string, taskID int) error {
@@ -28,21 +40,21 @@ func RunDeleteCommand(globalDB *GlobalDB, project, module string, taskID int) er
 	if taskID > 0 {
 		// Delete by task ID
 		query = `
-			SELECT pid, mode, shellPath, starttime, status
+			SELECT pid, mode, shellPath, starttime, status, node
 			FROM tasks
 			WHERE usrID=? AND Id=?
 		`
 		rows, err = globalDB.Db.Query(query, usrID, taskID)
 	} else if module != "" {
 		query = `
-			SELECT pid, mode, shellPath, starttime, status
+			SELECT pid, mode, shellPath, starttime, status, node
 			FROM tasks
 			WHERE usrID=? AND project=? AND module=?
 		`
 		rows, err = globalDB.Db.Query(query, usrID, project, module)
 	} else {
 		query = `
-			SELECT pid, mode, shellPath, starttime, status
+			SELECT pid, mode, shellPath, starttime, status, node
 			FROM tasks
 			WHERE usrID=? AND project=?
 		`
@@ -54,18 +66,10 @@ func RunDeleteCommand(globalDB *GlobalDB, project, module string, taskID int) er
 	}
 	defer rows.Close()
 
-	type TaskInfo struct {
-		pid       sql.NullInt64
-		mode      string
-		shellPath string
-		starttime string
-		status    string
-	}
-
 	var tasksToDelete []TaskInfo
 	for rows.Next() {
 		var task TaskInfo
-		err := rows.Scan(&task.pid, &task.mode, &task.shellPath, &task.starttime, &task.status)
+		err := rows.Scan(&task.pid, &task.mode, &task.shellPath, &task.starttime, &task.status, &task.node)
 		if err != nil {
 			log.Printf("Warning: Failed to scan task info: %v", err)
 			continue
@@ -74,21 +78,100 @@ func RunDeleteCommand(globalDB *GlobalDB, project, module string, taskID int) er
 	}
 	rows.Close()
 
-	// Separate tasks by status: running tasks need full delete process, others just delete from DB
-	var runningTasks []TaskInfo
+	// Get current node name
+	currentNode, err := os.Hostname()
+	if err != nil {
+		log.Printf("Warning: Could not get current hostname: %v", err)
+		currentNode = "unknown"
+	}
+
+	// Separate tasks by status and node: running tasks need full delete process, others just delete from DB
+	var runningTasksSameNode []TaskInfo
+	var runningTasksDifferentNode []TaskInfo
 	var nonRunningTasks []TaskInfo
+	var qsubsgeTasksDifferentNode []TaskInfo
 
 	for _, task := range tasksToDelete {
 		// Check if status is 'running' (case-insensitive comparison)
 		if strings.ToLower(task.status) == "running" {
-			runningTasks = append(runningTasks, task)
+			// For local mode, check node consistency
+			if task.mode == "local" {
+				taskNode := ""
+				if task.node.Valid && task.node.String != "" {
+					taskNode = task.node.String
+				}
+				// Check if node matches current node
+				if taskNode != "" && taskNode != currentNode {
+					// Node mismatch, need to execute on remote node
+					runningTasksDifferentNode = append(runningTasksDifferentNode, task)
+				} else {
+					// Same node or node not specified, execute locally
+					runningTasksSameNode = append(runningTasksSameNode, task)
+				}
+			} else if task.mode == "qsubsge" {
+				// For qsubsge mode, check if current node matches the submission node
+				taskNode := ""
+				if task.node.Valid && task.node.String != "" {
+					taskNode = task.node.String
+				}
+				// Check if node matches current node
+				if taskNode != "" && taskNode != currentNode {
+					// Node mismatch for qsubsge mode, need to check and warn
+					qsubsgeTasksDifferentNode = append(qsubsgeTasksDifferentNode, task)
+				} else {
+					// Same node or node not specified, execute locally
+					runningTasksSameNode = append(runningTasksSameNode, task)
+				}
+			}
 		} else {
+			// For non-running tasks, also check qsubsge mode node consistency
+			if task.mode == "qsubsge" {
+				taskNode := ""
+				if task.node.Valid && task.node.String != "" {
+					taskNode = task.node.String
+				}
+				if taskNode != "" && taskNode != currentNode {
+					qsubsgeTasksDifferentNode = append(qsubsgeTasksDifferentNode, task)
+					continue // Don't add to nonRunningTasks
+				}
+			}
 			nonRunningTasks = append(nonRunningTasks, task)
 		}
 	}
 
-	// For running tasks: execute full delete process (terminate processes, handle sub-tasks)
-	for _, task := range runningTasks {
+	// Check qsubsge tasks with different node - exit with error
+	if len(qsubsgeTasksDifferentNode) > 0 {
+		fmt.Fprintf(os.Stderr, "Error: Cannot delete qsubsge mode tasks from different node.\n")
+		fmt.Fprintf(os.Stderr, "Current node: %s\n", currentNode)
+		for _, task := range qsubsgeTasksDifferentNode {
+			taskNode := "unknown"
+			if task.node.Valid && task.node.String != "" {
+				taskNode = task.node.String
+			}
+			fmt.Fprintf(os.Stderr, "  Task %s was submitted from node: %s\n", filepath.Base(task.shellPath), taskNode)
+		}
+		fmt.Fprintf(os.Stderr, "Please run 'annotask delete' on the same node where 'annotask qsubsge' was executed.\n")
+		return fmt.Errorf("node mismatch: current node (%s) does not match submission node for qsubsge tasks", currentNode)
+	}
+
+	// For running tasks on different node: execute via SSH
+	for _, task := range runningTasksDifferentNode {
+		if !task.node.Valid || task.node.String == "" {
+			log.Printf("Warning: Task %s has no node information, skipping", task.shellPath)
+			continue
+		}
+		targetNode := task.node.String
+		fmt.Printf("Task is running on different node '%s', executing delete via SSH...\n", targetNode)
+		err := executeDeleteOnRemoteNode(targetNode, task)
+		if err != nil {
+			log.Printf("Warning: Failed to execute delete on remote node %s: %v", targetNode, err)
+		} else {
+			fmt.Printf("Successfully executed delete on remote node '%s'\n", targetNode)
+		}
+	}
+
+	// For running tasks on same node: execute full delete process (terminate processes, handle sub-tasks)
+	for _, task := range runningTasksSameNode {
 		// 1. Stop main process and its children by PID (only if process exists)
 		if task.pid.Valid && task.pid.Int64 > 0 {
 			pid := int(task.pid.Int64)
@@ -328,6 +411,152 @@ func killProcessTree(pid int) error {
 		if err == nil {
 			process.Kill()
 		}
+	}
+
+	return nil
+}
+
+// getSSHConfig creates SSH client configuration with authentication
+func getSSHConfig() (*ssh.ClientConfig, error) {
+	// Get current user's home directory
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get home directory: %v", err)
+	}
+
+	// Try to read SSH private key (try common key types)
+	keyPaths := []string{
+		filepath.Join(homeDir, ".ssh", "id_rsa"),
+		filepath.Join(homeDir, ".ssh", "id_ed25519"),
+		filepath.Join(homeDir, ".ssh", "id_ecdsa"),
+		filepath.Join(homeDir, ".ssh", "id_dsa"),
+	}
+
+	var signer ssh.Signer
+	var authMethod ssh.AuthMethod
+
+	for _, keyPath := range keyPaths {
+		key, err := os.ReadFile(keyPath)
+		if err != nil {
+			continue // Try next key
+		}
+
+		// Try to parse the key
+		parsedKey, err := ssh.ParsePrivateKey(key)
+		if err != nil {
+			// Try with passphrase (empty passphrase)
+			parsedKey, err = ssh.ParsePrivateKeyWithPassphrase(key, []byte{})
+			if err != nil {
+				continue // Try next key
+			}
+		}
+
+		signer = parsedKey
+		authMethod = ssh.PublicKeys(signer)
+		break
+	}
+
+	// If no key found, return error
+	if authMethod == nil {
+		return nil, fmt.Errorf("no SSH private key found in %s/.ssh/ (tried: id_rsa, id_ed25519, id_ecdsa, id_dsa)", homeDir)
+	}
+
+	// Get current username
+	username := os.Getenv("USER")
+	if username == "" {
+		username = os.Getenv("USERNAME")
+	}
+	if username == "" {
+		username = "root" // Fallback
+	}
+
+	config := &ssh.ClientConfig{
+		User:            username,
+		Auth:            []ssh.AuthMethod{authMethod},
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(), // Accept any host key (similar to StrictHostKeyChecking=no)
+		Timeout:         10 * time.Second,
+	}
+
+	return config, nil
+}
+
+// executeDeleteOnRemoteNode executes delete operation on remote node via SSH using golang.org/x/crypto/ssh
+func executeDeleteOnRemoteNode(targetNode string, task TaskInfo) error {
+	// Get SSH configuration
+	config, err := getSSHConfig()
+	if err != nil {
+		return fmt.Errorf("failed to get SSH config: %v", err)
+	}
+
+	// Connect to remote node
+	// Try with port 22 first, then check if port is specified in node name
+	address := targetNode
+	if !strings.Contains(address, ":") {
+		address = net.JoinHostPort(address, "22")
+	}
+
+	client, err := ssh.Dial("tcp", address, config)
+	if err != nil {
+		return fmt.Errorf("failed to connect to %s: %v", targetNode, err)
+	}
+	defer client.Close()
+
+	// Build the command to execute on remote node
+	// We need to:
+	// 1. Kill the main process and its children
+	// 2. Update local database status to failed
+	var commandParts []string
+
+	// 1. Kill main process if PID exists
+	if task.pid.Valid && task.pid.Int64 > 0 {
+		pid := task.pid.Int64
+		commandParts = append(commandParts, fmt.Sprintf(`
+if kill -0 %d 2>/dev/null; then
+	pkill -P %d 2>/dev/null || true
+	kill -TERM %d 2>/dev/null || true
+	sleep 0.2
+	kill -KILL %d 2>/dev/null || true
+	echo "Terminated process %d and its children"
+fi`, pid, pid, pid, pid, pid))
+	}
+
+	// 2. Update local database status to failed
+	dbPath := task.shellPath + ".db"
+	// Escape single quotes in dbPath for shell
+	escapedDbPath := strings.ReplaceAll(dbPath, "'", "'\"'\"'")
+	commandParts = append(commandParts, fmt.Sprintf(`
+if [ -f '%s' ]; then
+	now=$(date '+%%Y-%%m-%%d %%H:%%M:%%S')
+	sqlite3 '%s' "UPDATE job SET status='Failed', endtime='$now', exitCode=1 WHERE status='Running'" 2>/dev/null || true
+	echo "Updated local database status"
+fi`, escapedDbPath, escapedDbPath))
+
+	// Combine all commands into a single bash command
+	fullCommand := strings.Join(commandParts, "\n")
+
+	// Create a session
+	session, err := client.NewSession()
+	if err != nil {
+		return fmt.Errorf("failed to create SSH session: %v", err)
+	}
+	defer session.Close()
+
+	// Set up output
+	session.Stdout = os.Stdout
+	session.Stderr = os.Stderr
+
+	// Execute the command
+	err = session.Run(fullCommand)
+	if err != nil {
+		// Check if it's an exit error (command executed but returned non-zero)
+		if exitError, ok := err.(*ssh.ExitError); ok {
+			// Command executed but returned non-zero exit code
+			// This might be okay if some operations failed (e.g., process already dead)
+			log.Printf("SSH command on %s exited with code %d", targetNode, exitError.ExitStatus())
+			// Don't return error for non-zero exit codes, as some operations might legitimately fail
+			return nil
+		}
+		return fmt.Errorf("SSH command failed on node %s: %v", targetNode, err)
 	}
 
 	return nil
