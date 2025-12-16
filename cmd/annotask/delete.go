@@ -115,11 +115,13 @@ func RunDeleteCommand(globalDB *GlobalDB, project, module string, taskID int) er
 					taskNode = task.node.String
 				}
 				// Check if node matches current node
-				if taskNode != "" && taskNode != currentNode {
+				// Special case: if node is "-", it means old data (before node recording was implemented)
+				// Allow deletion in this case for backward compatibility
+				if taskNode != "" && taskNode != "-" && taskNode != currentNode {
 					// Node mismatch for qsubsge mode, need to check and warn
 					qsubsgeTasksDifferentNode = append(qsubsgeTasksDifferentNode, task)
 				} else {
-					// Same node or node not specified, execute locally
+					// Same node, node not specified, or node is "-" (old data), execute locally
 					runningTasksSameNode = append(runningTasksSameNode, task)
 				}
 			}
@@ -130,7 +132,9 @@ func RunDeleteCommand(globalDB *GlobalDB, project, module string, taskID int) er
 				if task.node.Valid && task.node.String != "" {
 					taskNode = task.node.String
 				}
-				if taskNode != "" && taskNode != currentNode {
+				// Special case: if node is "-", it means old data (before node recording was implemented)
+				// Allow deletion in this case for backward compatibility
+				if taskNode != "" && taskNode != "-" && taskNode != currentNode {
 					qsubsgeTasksDifferentNode = append(qsubsgeTasksDifferentNode, task)
 					continue // Don't add to nonRunningTasks
 				}
