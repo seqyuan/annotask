@@ -112,13 +112,13 @@ annotask qsubsge -i input.sh --hostname node1
 # 指定节点（多个节点，任选其一）
 annotask qsubsge -i input.sh --hostname node1,node2,node3
 
-# 使用 -pe smp 并行环境模式（默认）
-annotask qsubsge -i input.sh --cpu 4 --h_vmem 5
+# 使用 -l p=X 并行环境模式（默认）
+annotask qsubsge -i input.sh --cpu 4 --h_vmem 18
 # 或显式指定
-annotask qsubsge -i input.sh --cpu 4 --h_vmem 5 --mode pe_smp
-
-# 使用 -l p=X 模式
 annotask qsubsge -i input.sh --cpu 4 --h_vmem 18 --mode num_proc
+
+# 使用 -pe smp 模式
+annotask qsubsge -i input.sh --cpu 4 --h_vmem 5 --mode pe_smp
 ```
 
 ### 参数说明
@@ -134,7 +134,7 @@ annotask qsubsge -i input.sh --cpu 4 --h_vmem 18 --mode num_proc
     --queue     队列名称（多个队列用逗号分隔，默认：从用户配置或系统配置读取）
     -P, --sge-project  SGE项目名称（用于资源配额管理，默认：从用户配置或系统配置读取）
     --hostname  指定节点（单个节点或逗号分隔的多个节点，映射到 -l h=hostname，仅 qsubsge 模式）
-    --mode      并行环境模式：pe_smp（使用 -pe smp X，默认）或 num_proc（使用 -l p=X）
+    --mode      并行环境模式：num_proc（使用 -l p=X，默认）或 pe_smp（使用 -pe smp X）
 ```
 
 **重要说明**：
@@ -149,12 +149,12 @@ annotask qsubsge -i input.sh --cpu 4 --h_vmem 18 --mode num_proc
 - `--hostname` 用于指定任务运行的节点，支持单个节点或逗号分隔的多个节点（例如：`node1` 或 `node1,node2`），DRMAA 投递时使用 `-l h=hostname`。如果设置为 "none"（大小写不敏感）或空，则不会添加节点限制。**注意：此参数仅对 qsubsge 模式有效，local 模式不支持**
 
 **并行环境模式**：
-- **pe_smp 模式**（默认，`--mode pe_smp`）：使用 `-pe smp X` 指定 CPU 数量
-  - 示例：`--cpu 4 --h_vmem 5` → `-l h_vmem=5G -pe smp 4`
-  - 这里的内存指的是单 CPU 需要消耗的内存
-- **num_proc 模式**（`--mode num_proc`）：使用 `-l p=X` 指定 CPU 数量
-  - 示例：`--cpu 4 --h_vmem 18 --mode num_proc` → `-l h_vmem=18G,p=4`
+- **num_proc 模式**（默认，`--mode num_proc`）：使用 `-l p=X` 指定 CPU 数量
+  - 示例：`--cpu 4 --h_vmem 18` → `-l h_vmem=18G,p=4`
   - 这里的内存指的是总内存
+- **pe_smp 模式**（`--mode pe_smp`）：使用 `-pe smp X` 指定 CPU 数量
+  - 示例：`--cpu 4 --h_vmem 5 --mode pe_smp` → `-l h_vmem=5G -pe smp 4`
+  - 这里的内存指的是单 CPU 需要消耗的内存
 
 ### 注意事项
 
