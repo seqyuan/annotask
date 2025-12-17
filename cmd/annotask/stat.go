@@ -204,7 +204,7 @@ func RunStatCommand(globalDB *GlobalDB, projectFilter string, config *Config) er
 
 		// Output format: project module mode status statis stime etime
 		// statis format: finishedTasks/totalTasks (已完成数/总任务数)
-		fmt.Printf("%-15s %-20s %-10s %-10s %-15s %-12s %-12s\n",
+		fmt.Printf("%-28s %-20s %-10s %-10s %-15s %-12s %-12s\n",
 			"project", "module", "mode", "status", "statis", "stime", "etime")
 
 		var count int
@@ -236,7 +236,7 @@ func RunStatCommand(globalDB *GlobalDB, projectFilter string, config *Config) er
 				etimeStr = formatTimeShort(endtime.String)
 			}
 
-			fmt.Printf("%-15s %-20s %-10s %-10s %-15s %-12s %-12s\n",
+			fmt.Printf("%-28s %-20s %-10s %-10s %-15s %-12s %-12s\n",
 				project, module, mode, statusStr, statisStr, stimeStr, etimeStr)
 			count++
 		}
