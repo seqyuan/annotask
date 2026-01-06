@@ -15,7 +15,7 @@ go env -w GOPROXY=https://goproxy.cn,direct
 # go env -w GOPROXY=https://mirrors.tuna.tsinghua.edu.cn/goproxy/,direct
 
 # 安装（从 GitHub 下载并编译指定版本）
-# CGO_ENABLED=1 go install github.com/seqyuan/annotask/cmd/annotask@v1.9.5
+# CGO_ENABLED=1 go install github.com/seqyuan/annotask/cmd/annotask@v1.9.7
 CGO_ENABLED=1 go install github.com/seqyuan/annotask/cmd/annotask@latest
 ```
 
@@ -115,6 +115,13 @@ queue: sci.q
 # If not set, jobs will use default project or no project
 sge_project: ""
 
+# SGE environment settings.sh path (optional, for qsubsge mode)
+# If set, this path will be used to load SGE environment variables
+# If not set, program will auto-detect settings.sh from common installation paths
+# This should only be set in system config (not in user config) for unified management
+# Example: /opt/gridengine/default/common/settings.sh
+sgeenv: /opt/gridengine/default/common/settings.sh
+
 # Allowed node names for qsubsge mode (list format)
 # If empty or not set, no node restriction will be applied
 # In qsubsge mode, program will check if current node is in this list
@@ -154,6 +161,13 @@ monitor_update_interval: 60
 - `queue`: SGE 默认队列，默认为 `sci.q`
 
 - `sge_project`: SGE 项目名称（用于资源配额管理），默认为空
+
+- `sgeenv`: SGE 环境配置文件路径（可选，仅用于 qsubsge 模式）
+  - 如果设置，程序将使用此路径加载 SGE 环境变量
+  - 如果未设置，程序将自动检测常见安装路径中的 settings.sh
+  - **重要**：此配置项应仅在系统配置文件中设置（不在用户配置中），以便统一管理
+  - 所有用户共享此配置，确保使用相同的 SGE 环境
+  - 示例：`sgeenv: /opt/gridengine/default/common/settings.sh`
 
 - `node`: 允许使用 qsubsge 模式的节点列表（列表格式，支持多个节点）
   - 如果为空或不设置，则不对 qsubsge 模式做节点限制

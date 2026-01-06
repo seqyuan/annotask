@@ -60,6 +60,8 @@ type Config struct {
 	// If set, this path will be used to load SGE environment variables
 	// If not set, program will auto-detect settings.sh from common installation paths
 	// Example: /opt/gridengine/default/common/settings.sh
+	// Note: This should only be set in system config (annotask.yaml in program directory), not in user config
+	// This ensures all users share the same SGE environment configuration
 	SgeEnv string `yaml:"sgeenv"`
 	Defaults   struct {
 		Line   int `yaml:"line"`

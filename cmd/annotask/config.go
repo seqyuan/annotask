@@ -100,8 +100,8 @@ func LoadConfig() (*Config, error) {
 	}
 
 	// Then, load from user home config (if exists) - this takes precedence for non-db settings
-	// BUT: For global database path, we ALWAYS use executable directory config (not user home)
-	// This ensures all annotask instances use the same global database
+	// BUT: For global database path and SGE environment path, we ALWAYS use executable directory config (not user home)
+	// This ensures all annotask instances use the same global database and SGE environment
 	if _, err := os.Stat(userConfigPath); err == nil {
 		data, err := os.ReadFile(userConfigPath)
 		if err != nil {
@@ -111,12 +111,14 @@ func LoadConfig() (*Config, error) {
 		if err := yaml.Unmarshal(data, &userConfig); err != nil {
 			return nil, fmt.Errorf("failed to parse user config file: %v", err)
 		}
-		// Temporarily save current Db value (from system config)
+		// Temporarily save current Db and SgeEnv values (from system config)
 		currentDbPath := config.Db
-		// Merge user config (takes precedence for non-db settings)
+		currentSgeEnv := config.SgeEnv
+		// Merge user config (takes precedence for non-db, non-sgeenv settings)
 		mergeConfig(config, &userConfig)
-		// Restore system db path (don't use user's db path for global database)
+		// Restore system db path and sgeenv (don't use user's values for these)
 		config.Db = currentDbPath
+		config.SgeEnv = currentSgeEnv
 	}
 
 	// For global database, ALWAYS use executable directory config's db path (not user home)
@@ -156,9 +158,8 @@ func mergeConfig(target, source *Config) {
 	if source.SgeProject != "" {
 		target.SgeProject = source.SgeProject
 	}
-	if source.SgeEnv != "" {
-		target.SgeEnv = source.SgeEnv
-	}
+	// Note: SgeEnv is NOT merged here - it should always use executable directory config
+	// to ensure all annotask instances use the same SGE environment configuration
 	if source.Defaults.Line > 0 {
 		target.Defaults.Line = source.Defaults.Line
 	}
@@ -171,8 +172,8 @@ func mergeConfig(target, source *Config) {
 	if source.MonitorUpdateInterval > 0 {
 		target.MonitorUpdateInterval = source.MonitorUpdateInterval
 	}
-	// Db is NOT merged here - it should always use executable directory config
-	// to ensure all annotask instances use the same global database
+	// Db and SgeEnv are NOT merged here - they should always use executable directory config
+	// to ensure all annotask instances use the same global database and SGE environment
 }
 
 // EnsureUserConfig creates user home config file if it doesn't exist

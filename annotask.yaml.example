@@ -19,6 +19,13 @@ queue: sci.q
 # If not set, jobs will use default project or no project
 sge_project: ""
 
+# SGE environment settings.sh path (optional, for qsubsge mode)
+# If set, this path will be used to load SGE environment variables
+# If not set, program will auto-detect settings.sh from common installation paths
+# This should only be set in system config (not in user config) for unified management
+# Example: /opt/gridengine/default/common/settings.sh
+sgeenv: /opt/gridengine/default/common/settings.sh
+
 # Allowed node names for qsubsge mode (list format)
 # If empty or not set, no node restriction will be applied
 # In qsubsge mode, program will check if current node is in this list
