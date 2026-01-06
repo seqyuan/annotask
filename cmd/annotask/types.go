@@ -56,6 +56,11 @@ type Config struct {
 	Queue      string   `yaml:"queue"`
 	Node       NodeList `yaml:"node"`
 	SgeProject string   `yaml:"sge_project"`
+	// SgeEnv specifies the path to SGE settings.sh file
+	// If set, this path will be used to load SGE environment variables
+	// If not set, program will auto-detect settings.sh from common installation paths
+	// Example: /opt/gridengine/default/common/settings.sh
+	SgeEnv string `yaml:"sgeenv"`
 	Defaults   struct {
 		Line   int `yaml:"line"`
 		Thread int `yaml:"thread"`

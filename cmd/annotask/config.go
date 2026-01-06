@@ -43,6 +43,7 @@ func LoadConfig() (*Config, error) {
 	config.Queue = "default.q"
 	config.Node = []string{}
 	config.SgeProject = ""
+	config.SgeEnv = ""
 	config.Defaults.Line = 1
 	config.Defaults.Thread = 1
 	config.Defaults.CPU = 1
@@ -79,6 +80,7 @@ func LoadConfig() (*Config, error) {
 		defaultExeConfig.Queue = "default.q"
 		defaultExeConfig.Node = []string{}
 		defaultExeConfig.SgeProject = ""
+		defaultExeConfig.SgeEnv = ""
 		defaultExeConfig.Defaults.Line = 1
 		defaultExeConfig.Defaults.Thread = 1
 		defaultExeConfig.Defaults.CPU = 1
@@ -153,6 +155,9 @@ func mergeConfig(target, source *Config) {
 	}
 	if source.SgeProject != "" {
 		target.SgeProject = source.SgeProject
+	}
+	if source.SgeEnv != "" {
+		target.SgeEnv = source.SgeEnv
 	}
 	if source.Defaults.Line > 0 {
 		target.Defaults.Line = source.Defaults.Line

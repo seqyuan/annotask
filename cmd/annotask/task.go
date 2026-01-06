@@ -25,7 +25,244 @@ var (
 	drmaaSession      drmaa.Session
 	drmaaSessionMutex sync.Mutex
 	drmaaSessionInit  bool
+	// configuredSettingsPath stores the settings.sh path from config
+	// Set by runQsubSgeMode before first DRMAA session creation
+	configuredSettingsPath string
 )
+
+// loadSettingsSh loads environment variables from SGE settings.sh file
+// This mimics the effect of "source settings.sh" in shell
+func loadSettingsSh(settingsPath string) error {
+	// Read settings.sh file
+	content, err := os.ReadFile(settingsPath)
+	if err != nil {
+		return fmt.Errorf("failed to read settings.sh: %v", err)
+	}
+
+	lines := strings.Split(string(content), "\n")
+	sgeRoot := ""
+
+	// First pass: extract SGE_ROOT and simple variable assignments
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		// Skip comments and empty lines
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		// Extract SGE_ROOT first (needed for other commands)
+		if strings.HasPrefix(line, "SGE_ROOT=") {
+			parts := strings.SplitN(line, "=", 2)
+			if len(parts) == 2 {
+				// Remove quotes and semicolon
+				value := strings.Trim(parts[1], `";'`)
+				value = strings.TrimSuffix(value, ";")
+				sgeRoot = value
+				os.Setenv("SGE_ROOT", sgeRoot)
+			}
+		}
+	}
+
+	// If SGE_ROOT not found in file, return error
+	if sgeRoot == "" {
+		return fmt.Errorf("SGE_ROOT not found in settings.sh")
+	}
+
+	// Verify SGE_ROOT path exists
+	if _, err := os.Stat(sgeRoot); err != nil {
+		return fmt.Errorf("SGE_ROOT path does not exist: %s", sgeRoot)
+	}
+
+	// Second pass: extract other environment variables and execute commands
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		// Handle SGE_CELL
+		if strings.HasPrefix(line, "SGE_CELL=") {
+			parts := strings.SplitN(line, "=", 2)
+			if len(parts) == 2 {
+				value := strings.Trim(parts[1], `";'`)
+				value = strings.TrimSuffix(value, ";")
+				os.Setenv("SGE_CELL", value)
+			}
+		}
+
+		// Handle SGE_CLUSTER_NAME
+		if strings.HasPrefix(line, "SGE_CLUSTER_NAME=") {
+			parts := strings.SplitN(line, "=", 2)
+			if len(parts) == 2 {
+				value := strings.Trim(parts[1], `";'`)
+				value = strings.TrimSuffix(value, ";")
+				os.Setenv("SGE_CLUSTER_NAME", value)
+			}
+		}
+
+		// Handle SGE_QMASTER_PORT
+		if strings.HasPrefix(line, "SGE_QMASTER_PORT=") {
+			parts := strings.SplitN(line, "=", 2)
+			if len(parts) == 2 {
+				value := strings.Trim(parts[1], `";'`)
+				value = strings.TrimSuffix(value, ";")
+				os.Setenv("SGE_QMASTER_PORT", value)
+			}
+		}
+
+		// Handle SGE_EXECD_PORT
+		if strings.HasPrefix(line, "SGE_EXECD_PORT=") {
+			parts := strings.SplitN(line, "=", 2)
+			if len(parts) == 2 {
+				value := strings.Trim(parts[1], `";'`)
+				value = strings.TrimSuffix(value, ";")
+				os.Setenv("SGE_EXECD_PORT", value)
+			}
+		}
+
+		// Handle SGE_ARCH (requires executing $SGE_ROOT/util/arch)
+		if strings.Contains(line, "SGE_ARCH=") && strings.Contains(line, "$SGE_ROOT/util/arch") {
+			archCmd := exec.Command(filepath.Join(sgeRoot, "util", "arch"))
+			archOutput, err := archCmd.Output()
+			if err == nil {
+				sgeArch := strings.TrimSpace(string(archOutput))
+				os.Setenv("SGE_ARCH", sgeArch)
+			}
+		}
+
+		// Handle DRMAA_LIBRARY_PATH
+		if strings.HasPrefix(line, "DRMAA_LIBRARY_PATH=") {
+			parts := strings.SplitN(line, "=", 2)
+			if len(parts) == 2 {
+				value := strings.Trim(parts[1], `";'`)
+				value = strings.TrimSuffix(value, ";")
+				// Expand $SGE_ROOT if present
+				value = strings.ReplaceAll(value, "$SGE_ROOT", sgeRoot)
+				os.Setenv("DRMAA_LIBRARY_PATH", value)
+			}
+		}
+
+		// Handle PATH updates
+		if strings.HasPrefix(line, "PATH=") && strings.Contains(line, "$SGE_ROOT") {
+			parts := strings.SplitN(line, "=", 2)
+			if len(parts) == 2 {
+				value := strings.Trim(parts[1], `";'`)
+				value = strings.TrimSuffix(value, ";")
+				// Expand $SGE_ROOT and $SGE_ARCH
+				value = strings.ReplaceAll(value, "$SGE_ROOT", sgeRoot)
+				if sgeArch := os.Getenv("SGE_ARCH"); sgeArch != "" {
+					value = strings.ReplaceAll(value, "$SGE_ARCH", sgeArch)
+				}
+				// Prepend to existing PATH
+				currentPath := os.Getenv("PATH")
+				if currentPath != "" {
+					os.Setenv("PATH", value+":"+currentPath)
+				} else {
+					os.Setenv("PATH", value)
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
+// detectAndSetSGERoot automatically detects and sets SGE environment variables
+// by loading settings.sh file, similar to "source settings.sh" in shell
+// If settingsPath is provided (from config), it will be used first
+func detectAndSetSGERoot(settingsPath string) error {
+	// If settingsPath is provided (from config), try to use it first
+	if settingsPath != "" {
+		if _, err := os.Stat(settingsPath); err == nil {
+			if err := loadSettingsSh(settingsPath); err == nil {
+				log.Printf("Loaded SGE environment variables from configured path: %s", settingsPath)
+				return nil
+			} else {
+				log.Printf("Warning: Failed to load settings.sh from configured path %s: %v, trying auto-detection", settingsPath, err)
+			}
+		} else {
+			log.Printf("Warning: Configured settings.sh path does not exist: %s, trying auto-detection", settingsPath)
+		}
+	}
+	// Check if SGE_ROOT is already set and valid
+	if sgeRoot := os.Getenv("SGE_ROOT"); sgeRoot != "" {
+		// Verify the path exists
+		if _, err := os.Stat(sgeRoot); err == nil {
+			// Check if other SGE variables are also set (indicating settings.sh was already sourced)
+			if os.Getenv("SGE_CELL") != "" || os.Getenv("SGE_CLUSTER_NAME") != "" {
+				// Looks like settings.sh was already sourced, we're good
+				return nil
+			}
+			// SGE_ROOT is set but other vars are not, try to load settings.sh
+			settingsPath := filepath.Join(sgeRoot, "default", "common", "settings.sh")
+			if _, err := os.Stat(settingsPath); err == nil {
+				if err := loadSettingsSh(settingsPath); err == nil {
+					log.Printf("Loaded SGE environment variables from settings.sh (SGE_ROOT was already set)")
+					return nil
+				}
+			}
+		}
+		// If set but path doesn't exist, try to detect a valid path
+	}
+
+	// Common SGE installation paths to check
+	commonPaths := []string{
+		"/opt/gridengine",
+		"/usr/share/gridengine",
+		"/opt/sge",
+		"/usr/local/sge",
+		"/opt/sge6",
+		"/usr/share/sge",
+	}
+
+	// Try to find SGE installation by checking for common/settings.sh
+	for _, path := range commonPaths {
+		settingsPath := filepath.Join(path, "default", "common", "settings.sh")
+		if _, err := os.Stat(settingsPath); err == nil {
+			// Found valid SGE installation, load settings.sh
+			if err := loadSettingsSh(settingsPath); err == nil {
+				log.Printf("Auto-detected and loaded SGE environment from: %s", settingsPath)
+				return nil
+			}
+		}
+		// Also check without "default" subdirectory (some installations)
+		settingsPathAlt := filepath.Join(path, "common", "settings.sh")
+		if _, err := os.Stat(settingsPathAlt); err == nil {
+			if err := loadSettingsSh(settingsPathAlt); err == nil {
+				log.Printf("Auto-detected and loaded SGE environment from: %s", settingsPathAlt)
+				return nil
+			}
+		}
+	}
+
+	// If not found, try to detect from DRMAA library path (if available)
+	// Check if we can find libdrmaa.so and infer SGE_ROOT from its path
+	// This is a fallback method
+	if drmaaLibPath := os.Getenv("LD_LIBRARY_PATH"); drmaaLibPath != "" {
+		paths := strings.Split(drmaaLibPath, ":")
+		for _, libPath := range paths {
+			// Try to find parent directory that looks like SGE root
+			// e.g., /opt/gridengine/lib/lx-amd64 -> /opt/gridengine
+			if strings.Contains(libPath, "gridengine") || strings.Contains(libPath, "sge") {
+				// Go up directories to find potential SGE_ROOT
+				current := libPath
+				for i := 0; i < 3; i++ {
+					parent := filepath.Dir(current)
+					settingsPath := filepath.Join(parent, "default", "common", "settings.sh")
+					if _, err := os.Stat(settingsPath); err == nil {
+						if err := loadSettingsSh(settingsPath); err == nil {
+							log.Printf("Auto-detected and loaded SGE environment from library path: %s", settingsPath)
+							return nil
+						}
+					}
+					current = parent
+				}
+			}
+		}
+	}
+
+	return fmt.Errorf("SGE_ROOT not set and could not auto-detect. Please set SGE_ROOT environment variable, source settings.sh, or ensure SGE is installed in a standard location")
+}
 
 // getDRMAASession returns a global DRMAA session (thread-safe)
 func getDRMAASession() (*drmaa.Session, error) {
@@ -33,9 +270,16 @@ func getDRMAASession() (*drmaa.Session, error) {
 	defer drmaaSessionMutex.Unlock()
 
 	if !drmaaSessionInit {
+		// Use configured settings path if available, otherwise auto-detect
+		settingsPath := configuredSettingsPath
+		// Auto-detect and set SGE_ROOT if not already set
+		if err := detectAndSetSGERoot(settingsPath); err != nil {
+			return nil, fmt.Errorf("failed to set SGE_ROOT: %v", err)
+		}
+
 		session, err := drmaa.MakeSession()
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to create DRMAA session: %v (SGE_ROOT=%s)", err, os.Getenv("SGE_ROOT"))
 		}
 		drmaaSession = session
 		drmaaSessionInit = true

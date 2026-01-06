@@ -8,7 +8,7 @@ import (
 
 // printModuleList prints list of available modules
 func printModuleList() {
-	fmt.Println("annotask - parallel task v1.9.5")
+	fmt.Println("annotask - parallel task v1.9.6")
 	fmt.Println()
 	fmt.Println("Available modules:")
 	fmt.Println("    local             Run tasks locally (default module)")
@@ -57,6 +57,7 @@ func printModuleHelp(module string, config *Config) {
 		fmt.Println("    --queue            Queue name(s), comma-separated for multiple queues (default: from config)")
 		fmt.Println("    -P, --sge-project  SGE project name for resource quota management (default: from config)")
 		fmt.Println("    --mode             Parallel environment mode: pe_smp (use -pe smp X) or num_proc (use -l p=X, default)")
+		fmt.Println("    --hostname         Specify hostname(s) for job execution. Supports single hostname or comma-separated list (e.g., node1 or node1,node2). Maps to -l h=hostname in SGE")
 	case "stat":
 		fmt.Println("annotask stat - Query task status from global database")
 		fmt.Println()

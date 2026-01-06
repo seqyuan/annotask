@@ -69,6 +69,20 @@ func runQsubSgeMode(config *Config, args []string) {
 		log.Fatalf("Node check failed: %v", err)
 	}
 
+	// Set configured settings.sh path for DRMAA session initialization
+	// This will be used by getDRMAASession() if provided
+	if config.SgeEnv != "" {
+		// Verify the path exists
+		if _, err := os.Stat(config.SgeEnv); err == nil {
+			// Store in global variable for use by getDRMAASession
+			// Note: This is set before any DRMAA session creation
+			configuredSettingsPath = config.SgeEnv
+			log.Printf("Using configured SGE settings.sh path: %s", config.SgeEnv)
+		} else {
+			log.Printf("Warning: Configured SGE settings.sh path does not exist: %s, will use auto-detection", config.SgeEnv)
+		}
+	}
+
 	parser := argparse.NewParser("annotask qsubsge", "Submit tasks to qsub SGE system")
 	opt_i := parser.String("i", "infile", &argparse.Options{Required: true, Help: "Input shell command file (one command per line or grouped by -l)"})
 	opt_l := parser.Int("l", "line", &argparse.Options{Default: config.Defaults.Line, Help: fmt.Sprintf("Number of lines to group as one task (default: %d)", config.Defaults.Line)})

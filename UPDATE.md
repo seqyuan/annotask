@@ -381,5 +381,5 @@ CGO_ENABLED=1 go install github.com/seqyuan/annotask/cmd/annotask@latest
 
 ---
 
-*最后更新：2024-12*
+*最后更新：2025-01*
 
